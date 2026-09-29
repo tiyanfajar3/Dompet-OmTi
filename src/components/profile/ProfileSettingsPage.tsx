@@ -23,7 +23,8 @@ import {
   Monitor,
   Eye,
   EyeOff,
-  ShieldAlert
+  ShieldAlert,
+  Cloud
 } from 'lucide-react';
 import { ThemeMode, Category, PaymentMethod } from '../../types';
 import { storageService } from '../../lib/storage';
@@ -523,6 +524,23 @@ export const ProfileSettingsPage: React.FC = () => {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Cloud Firestore Storage Status */}
+      <div className="p-5 sm:p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <Cloud className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <span>Penyimpanan Cloud Firestore</span>
+          </h2>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/80">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            Terhubung Cloud
+          </span>
+        </div>
+        <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+          Seluruh data transaksi, saldo, bukti struk, dan kategori tersimpan aman di cloud <strong>Firebase Firestore (dompet-omti-247cc)</strong>. Data otomatis tersinkronisasi secara real-time antar perangkat (HP, tablet, dan laptop) tanpa risiko data hilang atau reset.
+        </p>
       </div>
 
       {/* Section 4: Cadangan & Ekspor Data */}

@@ -176,8 +176,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [applyTheme]);
 
-  // Initial Load & Auth Session Check
+  // Initial Load, Auth Session Check & Firestore Realtime Sync
   useEffect(() => {
+    let unsubs: Array<() => void> = [];
+
     const init = async () => {
       setIsLoading(true);
       try {
@@ -195,15 +197,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             setIsAuthenticated(false);
           }
         }
+
+        // Attach Realtime Subscriptions so data stays automatically synchronized across devices
+        const unsubTx = storageService.subscribeTransactions((txs) => {
+          setTransactions(txs);
+        });
+        const unsubCat = storageService.subscribeCategories((cats) => {
+          setCategories(cats);
+        });
+        const unsubPm = storageService.subscribePaymentMethods((pms) => {
+          setPaymentMethods(pms);
+        });
+        const unsubBg = storageService.subscribeBudgets((bgs) => {
+          setBudgets(bgs);
+        });
+        const unsubRec = storageService.subscribeRecurringTransactions((recs) => {
+          setRecurringTransactions(recs);
+        });
+        const unsubProf = storageService.subscribeProfile((p) => {
+          if (p) {
+            setProfile(p);
+            const savedTheme = localStorage.getItem(THEME_KEY) as ThemeMode;
+            const activeThemeMode = savedTheme || p.theme || 'system';
+            setThemeState(activeThemeMode);
+            applyTheme(activeThemeMode);
+          }
+        });
+
+        unsubs = [unsubTx, unsubCat, unsubPm, unsubBg, unsubRec, unsubProf];
       } catch (e) {
-        console.error('Failed to initialize Dompet Omti database:', e);
+        console.error('Failed to initialize Dompet Omti Firestore database:', e);
       } finally {
         setIsLoading(false);
       }
     };
 
     init();
-  }, [refreshData]);
+
+    return () => {
+      unsubs.forEach(unsub => unsub());
+    };
+  }, [refreshData, applyTheme]);
 
   // Listen to system dark mode preference changes
   useEffect(() => {
