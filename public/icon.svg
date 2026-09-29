@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#1e293b" />
+    </linearGradient>
+    <linearGradient id="emeraldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34d399" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  
+  <!-- Rounded Base Background -->
+  <rect width="512" height="512" rx="128" fill="url(#bgGrad)" />
+  
+  <!-- Outer subtle ring -->
+  <rect x="24" y="24" width="464" height="464" rx="108" fill="none" stroke="#334155" stroke-width="4" stroke-opacity="0.5" />
+  
+  <!-- Wallet Body with shadow -->
+  <g filter="url(#shadow)">
+    <!-- Main Wallet card folder -->
+    <rect x="88" y="140" width="336" height="232" rx="36" fill="url(#emeraldGrad)" />
+    
+    <!-- Inner flap / card top layer -->
+    <path d="M 88,210 Q 256,230 424,210 L 424,336 Q 424,372 388,372 L 124,372 Q 88,372 88,336 Z" fill="#047857" opacity="0.4" />
+    
+    <!-- Clasp pocket flap -->
+    <path d="M 280,216 L 396,216 Q 424,216 424,244 L 424,268 Q 424,296 396,296 L 280,296 Q 268,296 268,284 L 268,228 Q 268,216 280,216 Z" fill="#065f46" stroke="#10b981" stroke-width="3" />
+    
+    <!-- Golden Clasp Emblem with 'O' for Omti -->
+    <circle cx="360" cy="256" r="22" fill="url(#goldGrad)" />
+    <circle cx="360" cy="256" r="14" fill="#0f172a" />
+    <circle cx="360" cy="256" r="7" fill="#fbbf24" />
+    
+    <!-- Accent Line -->
+    <line x1="120" y1="184" x2="280" y2="184" stroke="#a7f3d0" stroke-width="6" stroke-linecap="round" opacity="0.75" />
+    <line x1="120" y1="208" x2="220" y2="208" stroke="#a7f3d0" stroke-width="4" stroke-linecap="round" opacity="0.5" />
+  </g>
+</svg>
