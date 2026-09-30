@@ -18,7 +18,7 @@ import {
   BackupData 
 } from '../types';
 import { generateSalt, hashPassword } from './crypto';
-import { db, OperationType, handleFirestoreError, testFirestoreConnection } from './firebase';
+import { db, OperationType, handleFirestoreError, testFirestoreConnection, ensureAuthenticated } from './firebase';
 
 export const COLLECTIONS = {
   TRANSACTIONS: 'transactions',
@@ -80,134 +80,23 @@ export const DEFAULT_PAYMENT_METHODS = [
   { name: 'Lainnya', icon: 'Wallet' },
 ];
 
-// Fallback helper to migrate any legacy IndexedDB data if it existed on the client
-async function readLegacyIndexedDB(): Promise<{
-  profile: UserProfile | null;
-  transactions: Transaction[];
-  categories: Category[];
-  paymentMethods: PaymentMethod[];
-  budgets: Budget[];
-  recurring: RecurringTransaction[];
-}> {
-  try {
-    const dbs = await indexedDB.databases?.() || [];
-    const hasOldDb = dbs.some(d => d.name === 'dompet_omti_db');
-    if (!hasOldDb && !indexedDB) return { profile: null, transactions: [], categories: [], paymentMethods: [], budgets: [], recurring: [] };
-
-    return new Promise((resolve) => {
-      const req = indexedDB.open('dompet_omti_db', 1);
-      req.onerror = () => resolve({ profile: null, transactions: [], categories: [], paymentMethods: [], budgets: [], recurring: [] });
-      req.onsuccess = () => {
-        const idb = req.result;
-        const result: any = { profile: null, transactions: [], categories: [], paymentMethods: [], budgets: [], recurring: [] };
-        const stores = idb.objectStoreNames;
-
-        let pending = 0;
-        const checkDone = () => {
-          if (pending === 0) resolve(result);
-        };
-
-        const fetchStore = (storeName: string, targetKey: string) => {
-          if (stores.contains(storeName)) {
-            pending++;
-            try {
-              const tx = idb.transaction(storeName, 'readonly');
-              const r = tx.objectStore(storeName).getAll();
-              r.onsuccess = () => {
-                result[targetKey] = r.result || [];
-                if (targetKey === 'profile') {
-                  result.profile = result.profile[0] || null;
-                }
-                pending--;
-                checkDone();
-              };
-              r.onerror = () => {
-                pending--;
-                checkDone();
-              };
-            } catch {
-              pending--;
-              checkDone();
-            }
-          }
-        };
-
-        fetchStore('user_profile', 'profile');
-        fetchStore('transactions', 'transactions');
-        fetchStore('categories', 'categories');
-        fetchStore('payment_methods', 'paymentMethods');
-        fetchStore('budgets', 'budgets');
-        fetchStore('recurring_transactions', 'recurring');
-
-        if (pending === 0) resolve(result);
-      };
-    });
-  } catch {
-    return { profile: null, transactions: [], categories: [], paymentMethods: [], budgets: [], recurring: [] };
-  }
-}
-
-// Initialize Firestore Database with seed or migrated data
+// Initialize Firestore Database with seed or verify existing data
 export async function initializeDatabase(): Promise<void> {
-  await testFirestoreConnection();
+  await ensureAuthenticated();
 
   try {
     // Check if Firestore already contains categories
     const catSnap = await getDocs(collection(db, COLLECTIONS.CATEGORIES));
     const now = new Date().toISOString();
 
+    // If categories do not exist, seed default categories & payment methods
     if (catSnap.empty) {
-      // Check if we can migrate existing data from IndexedDB
-      const legacy = await readLegacyIndexedDB();
-      const hasLegacyData = legacy.transactions.length > 0 || legacy.categories.length > 0 || legacy.profile !== null;
-
-      if (hasLegacyData) {
-        console.info('Migrasi data lokal ke Firestore Database Dompet Omti...');
-        const batch = writeBatch(db);
-
-        // Migrate profile
-        if (legacy.profile) {
-          batch.set(doc(db, COLLECTIONS.PROFILE, 'owner_1'), cleanFirestoreData(legacy.profile));
-        }
-
-        // Migrate categories
-        for (const cat of legacy.categories) {
-          batch.set(doc(db, COLLECTIONS.CATEGORIES, cat.id), cleanFirestoreData(cat));
-        }
-
-        // Migrate payment methods
-        for (const pm of legacy.paymentMethods) {
-          batch.set(doc(db, COLLECTIONS.PAYMENT_METHODS, pm.id), cleanFirestoreData(pm));
-        }
-
-        // Migrate budgets
-        for (const b of legacy.budgets) {
-          batch.set(doc(db, COLLECTIONS.BUDGETS, b.id), cleanFirestoreData(b));
-        }
-
-        // Migrate recurring
-        for (const rec of legacy.recurring) {
-          batch.set(doc(db, COLLECTIONS.RECURRING, rec.id), cleanFirestoreData(rec));
-        }
-
-        // Migrate transactions (up to 400 in batch)
-        for (const tx of legacy.transactions.slice(0, 400)) {
-          batch.set(doc(db, COLLECTIONS.TRANSACTIONS, tx.id), cleanFirestoreData(tx));
-        }
-
-        await batch.commit();
-        console.info('Migrasi ke Firestore berhasil diselesaikan.');
-        return;
-      }
-
-      // Fresh Firestore setup: seed default categories & payment methods
+      console.info('Menginisialisasi kategori default di Firestore...');
       const batch = writeBatch(db);
-      const categoryMap: Record<string, string> = {};
 
       let catIndex = 1;
       for (const item of DEFAULT_EXPENSE_CATEGORIES) {
         const id = `cat_exp_${catIndex++}`;
-        categoryMap[item.name] = id;
         batch.set(doc(db, COLLECTIONS.CATEGORIES, id), {
           id,
           name: item.name,
@@ -220,7 +109,6 @@ export async function initializeDatabase(): Promise<void> {
 
       for (const item of DEFAULT_INCOME_CATEGORIES) {
         const id = `cat_inc_${catIndex++}`;
-        categoryMap[item.name] = id;
         batch.set(doc(db, COLLECTIONS.CATEGORIES, id), {
           id,
           name: item.name,
@@ -231,7 +119,6 @@ export async function initializeDatabase(): Promise<void> {
         });
       }
 
-      // Seed payment methods
       let pmIndex = 1;
       for (const pm of DEFAULT_PAYMENT_METHODS) {
         const id = `pm_${pmIndex++}`;
@@ -244,185 +131,26 @@ export async function initializeDatabase(): Promise<void> {
         });
       }
 
-      // Default monthly budgets
-      if (categoryMap['Makanan']) {
-        batch.set(doc(db, COLLECTIONS.BUDGETS, 'b_1'), {
-          id: 'b_1',
-          categoryId: categoryMap['Makanan'],
-          amount: 2500000,
-          period: 'monthly',
-        });
-      }
-      if (categoryMap['Transportasi']) {
-        batch.set(doc(db, COLLECTIONS.BUDGETS, 'b_2'), {
-          id: 'b_2',
-          categoryId: categoryMap['Transportasi'],
-          amount: 800000,
-          period: 'monthly',
-        });
-      }
-      if (categoryMap['Pulsa & Internet']) {
-        batch.set(doc(db, COLLECTIONS.BUDGETS, 'b_3'), {
-          id: 'b_3',
-          categoryId: categoryMap['Pulsa & Internet'],
-          amount: 450000,
-          period: 'monthly',
-        });
-      }
-      if (categoryMap['Belanja']) {
-        batch.set(doc(db, COLLECTIONS.BUDGETS, 'b_4'), {
-          id: 'b_4',
-          categoryId: categoryMap['Belanja'],
-          amount: 1500000,
-          period: 'monthly',
-        });
-      }
-
-      // Default recurring transactions
-      if (categoryMap['Gaji']) {
-        batch.set(doc(db, COLLECTIONS.RECURRING, 'rec_1'), {
-          id: 'rec_1',
-          name: 'Gaji Bulanan',
-          type: 'income',
-          categoryId: categoryMap['Gaji'],
-          amount: 18500000,
-          paymentMethod: 'Transfer',
-          frequency: 'monthly',
-          startDate: `${new Date().getFullYear()}-01-25`,
-          active: true,
-          createdAt: now,
-        });
-      }
-      if (categoryMap['Pulsa & Internet']) {
-        batch.set(doc(db, COLLECTIONS.RECURRING, 'rec_2'), {
-          id: 'rec_2',
-          name: 'Langganan WiFi & Internet Rumah',
-          type: 'expense',
-          categoryId: categoryMap['Pulsa & Internet'],
-          amount: 385000,
-          paymentMethod: 'Bank',
-          frequency: 'monthly',
-          startDate: `${new Date().getFullYear()}-01-10`,
-          active: true,
-          createdAt: now,
-        });
-      }
-
-      // Sample transactions
-      const today = new Date();
-      const curYear = today.getFullYear();
-      const curMonth = String(today.getMonth() + 1).padStart(2, '0');
-
-      const sampleData: Array<Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'>> = [
-        {
-          type: 'income',
-          categoryId: categoryMap['Gaji'] || 'cat_inc_1',
-          categoryName: 'Gaji',
-          amount: 18500000,
-          date: `${curYear}-${curMonth}-01`,
-          description: 'Gaji Pokok & Tunjangan Eksekutif',
-          paymentMethod: 'Transfer',
-          receiptImages: [],
-        },
-        {
-          type: 'income',
-          categoryId: categoryMap['Bonus'] || 'cat_inc_2',
-          categoryName: 'Bonus',
-          amount: 4500000,
-          date: `${curYear}-${curMonth}-15`,
-          description: 'Dividen & Keuntungan Investasi',
-          paymentMethod: 'Bank',
-          receiptImages: [],
-        },
-        {
-          type: 'expense',
-          categoryId: categoryMap['Makanan'] || 'cat_exp_1',
-          categoryName: 'Makanan',
-          amount: 420000,
-          date: `${curYear}-${curMonth}-02`,
-          description: 'Jamuan Makan Siang Bisnis',
-          paymentMethod: 'Debit',
-          receiptImages: [],
-        },
-        {
-          type: 'expense',
-          categoryId: categoryMap['Belanja'] || 'cat_exp_3',
-          categoryName: 'Belanja',
-          amount: 850000,
-          date: `${curYear}-${curMonth}-05`,
-          description: 'Belanja Bulanan & Kebutuhan Pribadi',
-          paymentMethod: 'Kredit',
-          receiptImages: [],
-        },
-        {
-          type: 'expense',
-          categoryId: categoryMap['Pulsa & Internet'] || 'cat_exp_5',
-          categoryName: 'Pulsa & Internet',
-          amount: 385000,
-          date: `${curYear}-${curMonth}-10`,
-          description: 'Tagihan Fiber Internet High-Speed',
-          paymentMethod: 'Bank',
-          receiptImages: [],
-        },
-        {
-          type: 'expense',
-          categoryId: categoryMap['Transportasi'] || 'cat_exp_2',
-          categoryName: 'Transportasi',
-          amount: 250000,
-          date: `${curYear}-${curMonth}-12`,
-          description: 'Bahan Bakar & Tol',
-          paymentMethod: 'E-wallet',
-          receiptImages: [],
-        },
-        {
-          type: 'expense',
-          categoryId: categoryMap['Makanan'] || 'cat_exp_1',
-          categoryName: 'Makanan',
-          amount: 165000,
-          date: `${curYear}-${curMonth}-18`,
-          description: 'Kopi & Snack Santai Sore',
-          paymentMethod: 'Cash',
-          receiptImages: [],
-        },
-        {
-          type: 'expense',
-          categoryId: categoryMap['Kesehatan'] || 'cat_exp_7',
-          categoryName: 'Kesehatan',
-          amount: 320000,
-          date: `${curYear}-${curMonth}-22`,
-          description: 'Vitamin dan Suplemen Kesehatan',
-          paymentMethod: 'Debit',
-          receiptImages: [],
-        },
-      ];
-
-      let tIndex = 1;
-      for (const item of sampleData) {
-        const id = `tx_${Date.now()}_${tIndex++}`;
-        batch.set(doc(db, COLLECTIONS.TRANSACTIONS, id), {
-          id,
-          ...item,
-          createdAt: now,
-          updatedAt: now,
-        });
-      }
-
       await batch.commit();
-      console.info('Database Firestore Dompet Omti berhasil diinisialisasi.');
+      console.info('Kategori default berhasil dibuat di Firestore.');
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, 'initializeDatabase');
   }
 }
 
-// Storage Public API backed by Firestore Cloud Database
+// Storage Public API directly backed by Cloud Firestore
 export const storageService = {
   // Profile
   async getProfile(): Promise<UserProfile | null> {
     try {
       const snap = await getDoc(doc(db, COLLECTIONS.PROFILE, 'owner_1'));
       if (snap.exists()) {
-        return snap.data() as UserProfile;
+        const data = snap.data();
+        return {
+          ...data,
+          id: snap.id,
+        } as UserProfile;
       }
       return null;
     } catch (error) {
@@ -433,53 +161,99 @@ export const storageService = {
 
   async saveProfile(profile: UserProfile): Promise<UserProfile> {
     try {
-      const updated = {
+      const updated: UserProfile = {
         ...profile,
+        id: 'owner_1',
         updatedAt: new Date().toISOString(),
       };
       await setDoc(doc(db, COLLECTIONS.PROFILE, 'owner_1'), cleanFirestoreData(updated), { merge: true });
       return updated;
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `${COLLECTIONS.PROFILE}/owner_1`);
-      return profile;
+      const err = handleFirestoreError(error, OperationType.WRITE, `${COLLECTIONS.PROFILE}/owner_1`);
+      throw new Error(err.error || 'Gagal menyimpan profil ke Firestore.');
     }
   },
 
-  // Transactions
+  // Transactions CRUD backed completely by Firestore
   async getTransactions(): Promise<Transaction[]> {
     try {
       const snap = await getDocs(collection(db, COLLECTIONS.TRANSACTIONS));
-      const items = snap.docs.map(d => d.data() as Transaction);
+      const items: Transaction[] = snap.docs.map(d => {
+        const data = d.data();
+        return {
+          id: d.id, // Guarantee Firestore Document ID is always preserved
+          type: data.type || 'expense',
+          categoryId: data.categoryId || 'cat_exp_1',
+          categoryName: data.categoryName || data.category || 'Lainnya',
+          amount: typeof data.amount === 'number' ? data.amount : Number(data.amount) || 0,
+          date: data.date || new Date().toISOString().split('T')[0],
+          description: data.description || '',
+          paymentMethod: data.paymentMethod || 'Cash',
+          receiptImages: Array.isArray(data.receiptImages) ? data.receiptImages : [],
+          isRecurringInstance: !!data.isRecurringInstance,
+          recurringId: data.recurringId,
+          createdAt: data.createdAt || new Date().toISOString(),
+          updatedAt: data.updatedAt || data.createdAt || new Date().toISOString(),
+        };
+      });
+
       return items.sort((a, b) => {
         const cmp = (b.date || '').localeCompare(a.date || '');
         if (cmp !== 0) return cmp;
         return (b.createdAt || '').localeCompare(a.createdAt || '');
       });
     } catch (error) {
-      handleFirestoreError(error, OperationType.LIST, COLLECTIONS.TRANSACTIONS);
-      return [];
+      const err = handleFirestoreError(error, OperationType.LIST, COLLECTIONS.TRANSACTIONS);
+      throw new Error(err.error || 'Gagal memuat daftar transaksi dari Cloud Firestore.');
     }
   },
 
   async saveTransaction(transaction: Transaction): Promise<Transaction> {
+    if (!transaction.id) {
+      throw new Error('ID dokumen transaksi tidak valid.');
+    }
+
     try {
-      await setDoc(
-        doc(db, COLLECTIONS.TRANSACTIONS, transaction.id), 
-        cleanFirestoreData(transaction), 
-        { merge: true }
-      );
-      return transaction;
+      const docRef = doc(db, COLLECTIONS.TRANSACTIONS, transaction.id);
+      const dataToSave = cleanFirestoreData({
+        id: transaction.id,
+        type: transaction.type,
+        date: transaction.date,
+        category: transaction.categoryName || 'Lainnya',
+        categoryId: transaction.categoryId,
+        categoryName: transaction.categoryName || 'Lainnya',
+        amount: Number(transaction.amount) || 0,
+        description: transaction.description || '',
+        paymentMethod: transaction.paymentMethod || 'Cash',
+        receiptImages: Array.isArray(transaction.receiptImages) ? transaction.receiptImages : [],
+        isRecurringInstance: !!transaction.isRecurringInstance,
+        recurringId: transaction.recurringId,
+        createdAt: transaction.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      // Write directly to Cloud Firestore document
+      await setDoc(docRef, dataToSave, { merge: true });
+      return {
+        ...transaction,
+        updatedAt: dataToSave.updatedAt,
+      };
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `${COLLECTIONS.TRANSACTIONS}/${transaction.id}`);
-      return transaction;
+      const err = handleFirestoreError(error, OperationType.WRITE, `${COLLECTIONS.TRANSACTIONS}/${transaction.id}`);
+      throw new Error(err.error || 'Transaksi gagal disimpan ke database Firestore.');
     }
   },
 
   async deleteTransaction(id: string): Promise<void> {
+    if (!id || typeof id !== 'string') {
+      throw new Error('ID transaksi tidak valid untuk dihapus.');
+    }
+
     try {
       await deleteDoc(doc(db, COLLECTIONS.TRANSACTIONS, id));
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `${COLLECTIONS.TRANSACTIONS}/${id}`);
+      const err = handleFirestoreError(error, OperationType.DELETE, `${COLLECTIONS.TRANSACTIONS}/${id}`);
+      throw new Error(err.error || 'Transaksi gagal dihapus dari database Firestore.');
     }
   },
 
@@ -487,7 +261,10 @@ export const storageService = {
   async getCategories(): Promise<Category[]> {
     try {
       const snap = await getDocs(collection(db, COLLECTIONS.CATEGORIES));
-      return snap.docs.map(d => d.data() as Category);
+      return snap.docs.map(d => ({
+        ...d.data(),
+        id: d.id,
+      } as Category));
     } catch (error) {
       handleFirestoreError(error, OperationType.LIST, COLLECTIONS.CATEGORIES);
       return [];
@@ -503,8 +280,8 @@ export const storageService = {
       );
       return category;
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `${COLLECTIONS.CATEGORIES}/${category.id}`);
-      return category;
+      const err = handleFirestoreError(error, OperationType.WRITE, `${COLLECTIONS.CATEGORIES}/${category.id}`);
+      throw new Error(err.error || 'Gagal menyimpan kategori ke Firestore.');
     }
   },
 
@@ -512,7 +289,8 @@ export const storageService = {
     try {
       await deleteDoc(doc(db, COLLECTIONS.CATEGORIES, id));
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `${COLLECTIONS.CATEGORIES}/${id}`);
+      const err = handleFirestoreError(error, OperationType.DELETE, `${COLLECTIONS.CATEGORIES}/${id}`);
+      throw new Error(err.error || 'Gagal menghapus kategori dari Firestore.');
     }
   },
 
@@ -520,7 +298,10 @@ export const storageService = {
   async getPaymentMethods(): Promise<PaymentMethod[]> {
     try {
       const snap = await getDocs(collection(db, COLLECTIONS.PAYMENT_METHODS));
-      return snap.docs.map(d => d.data() as PaymentMethod);
+      return snap.docs.map(d => ({
+        ...d.data(),
+        id: d.id,
+      } as PaymentMethod));
     } catch (error) {
       handleFirestoreError(error, OperationType.LIST, COLLECTIONS.PAYMENT_METHODS);
       return [];
@@ -536,8 +317,8 @@ export const storageService = {
       );
       return method;
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `${COLLECTIONS.PAYMENT_METHODS}/${method.id}`);
-      return method;
+      const err = handleFirestoreError(error, OperationType.WRITE, `${COLLECTIONS.PAYMENT_METHODS}/${method.id}`);
+      throw new Error(err.error || 'Gagal menyimpan metode pembayaran.');
     }
   },
 
@@ -545,7 +326,8 @@ export const storageService = {
     try {
       await deleteDoc(doc(db, COLLECTIONS.PAYMENT_METHODS, id));
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `${COLLECTIONS.PAYMENT_METHODS}/${id}`);
+      const err = handleFirestoreError(error, OperationType.DELETE, `${COLLECTIONS.PAYMENT_METHODS}/${id}`);
+      throw new Error(err.error || 'Gagal menghapus metode pembayaran.');
     }
   },
 
@@ -553,7 +335,10 @@ export const storageService = {
   async getBudgets(): Promise<Budget[]> {
     try {
       const snap = await getDocs(collection(db, COLLECTIONS.BUDGETS));
-      return snap.docs.map(d => d.data() as Budget);
+      return snap.docs.map(d => ({
+        ...d.data(),
+        id: d.id,
+      } as Budget));
     } catch (error) {
       handleFirestoreError(error, OperationType.LIST, COLLECTIONS.BUDGETS);
       return [];
@@ -569,8 +354,8 @@ export const storageService = {
       );
       return budget;
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `${COLLECTIONS.BUDGETS}/${budget.id}`);
-      return budget;
+      const err = handleFirestoreError(error, OperationType.WRITE, `${COLLECTIONS.BUDGETS}/${budget.id}`);
+      throw new Error(err.error || 'Gagal menyimpan anggaran.');
     }
   },
 
@@ -578,7 +363,8 @@ export const storageService = {
     try {
       await deleteDoc(doc(db, COLLECTIONS.BUDGETS, id));
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `${COLLECTIONS.BUDGETS}/${id}`);
+      const err = handleFirestoreError(error, OperationType.DELETE, `${COLLECTIONS.BUDGETS}/${id}`);
+      throw new Error(err.error || 'Gagal menghapus anggaran.');
     }
   },
 
@@ -586,7 +372,10 @@ export const storageService = {
   async getRecurringTransactions(): Promise<RecurringTransaction[]> {
     try {
       const snap = await getDocs(collection(db, COLLECTIONS.RECURRING));
-      return snap.docs.map(d => d.data() as RecurringTransaction);
+      return snap.docs.map(d => ({
+        ...d.data(),
+        id: d.id,
+      } as RecurringTransaction));
     } catch (error) {
       handleFirestoreError(error, OperationType.LIST, COLLECTIONS.RECURRING);
       return [];
@@ -602,8 +391,8 @@ export const storageService = {
       );
       return rec;
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `${COLLECTIONS.RECURRING}/${rec.id}`);
-      return rec;
+      const err = handleFirestoreError(error, OperationType.WRITE, `${COLLECTIONS.RECURRING}/${rec.id}`);
+      throw new Error(err.error || 'Gagal menyimpan transaksi rutin.');
     }
   },
 
@@ -611,16 +400,34 @@ export const storageService = {
     try {
       await deleteDoc(doc(db, COLLECTIONS.RECURRING, id));
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `${COLLECTIONS.RECURRING}/${id}`);
+      const err = handleFirestoreError(error, OperationType.DELETE, `${COLLECTIONS.RECURRING}/${id}`);
+      throw new Error(err.error || 'Gagal menghapus transaksi rutin.');
     }
   },
 
   // Real-time Subscriptions with onSnapshot for instant cloud sync across devices
-  subscribeTransactions(callback: (items: Transaction[]) => void): () => void {
+  subscribeTransactions(callback: (items: Transaction[]) => void, onError?: (err: Error) => void): () => void {
     return onSnapshot(
       collection(db, COLLECTIONS.TRANSACTIONS),
       (snapshot) => {
-        const items = snapshot.docs.map(d => d.data() as Transaction);
+        const items: Transaction[] = snapshot.docs.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            type: data.type || 'expense',
+            categoryId: data.categoryId || 'cat_exp_1',
+            categoryName: data.categoryName || data.category || 'Lainnya',
+            amount: typeof data.amount === 'number' ? data.amount : Number(data.amount) || 0,
+            date: data.date || new Date().toISOString().split('T')[0],
+            description: data.description || '',
+            paymentMethod: data.paymentMethod || 'Cash',
+            receiptImages: Array.isArray(data.receiptImages) ? data.receiptImages : [],
+            isRecurringInstance: !!data.isRecurringInstance,
+            recurringId: data.recurringId,
+            createdAt: data.createdAt || new Date().toISOString(),
+            updatedAt: data.updatedAt || data.createdAt || new Date().toISOString(),
+          };
+        });
         items.sort((a, b) => {
           const cmp = (b.date || '').localeCompare(a.date || '');
           if (cmp !== 0) return cmp;
@@ -629,7 +436,8 @@ export const storageService = {
         callback(items);
       },
       (error) => {
-        handleFirestoreError(error, OperationType.LIST, COLLECTIONS.TRANSACTIONS);
+        const err = handleFirestoreError(error, OperationType.LIST, COLLECTIONS.TRANSACTIONS);
+        if (onError) onError(new Error(err.error));
       }
     );
   },
@@ -638,7 +446,10 @@ export const storageService = {
     return onSnapshot(
       collection(db, COLLECTIONS.CATEGORIES),
       (snapshot) => {
-        const items = snapshot.docs.map(d => d.data() as Category);
+        const items = snapshot.docs.map(d => ({
+          ...d.data(),
+          id: d.id,
+        } as Category));
         callback(items);
       },
       (error) => {
@@ -651,7 +462,10 @@ export const storageService = {
     return onSnapshot(
       collection(db, COLLECTIONS.PAYMENT_METHODS),
       (snapshot) => {
-        const items = snapshot.docs.map(d => d.data() as PaymentMethod);
+        const items = snapshot.docs.map(d => ({
+          ...d.data(),
+          id: d.id,
+        } as PaymentMethod));
         callback(items);
       },
       (error) => {
@@ -664,7 +478,10 @@ export const storageService = {
     return onSnapshot(
       collection(db, COLLECTIONS.BUDGETS),
       (snapshot) => {
-        const items = snapshot.docs.map(d => d.data() as Budget);
+        const items = snapshot.docs.map(d => ({
+          ...d.data(),
+          id: d.id,
+        } as Budget));
         callback(items);
       },
       (error) => {
@@ -677,7 +494,10 @@ export const storageService = {
     return onSnapshot(
       collection(db, COLLECTIONS.RECURRING),
       (snapshot) => {
-        const items = snapshot.docs.map(d => d.data() as RecurringTransaction);
+        const items = snapshot.docs.map(d => ({
+          ...d.data(),
+          id: d.id,
+        } as RecurringTransaction));
         callback(items);
       },
       (error) => {
@@ -691,7 +511,10 @@ export const storageService = {
       doc(db, COLLECTIONS.PROFILE, 'owner_1'),
       (snapshot) => {
         if (snapshot.exists()) {
-          callback(snapshot.data() as UserProfile);
+          callback({
+            ...snapshot.data(),
+            id: snapshot.id,
+          } as UserProfile);
         } else {
           callback(null);
         }
@@ -735,7 +558,6 @@ export const storageService = {
       throw new Error('Format file cadangan tidak valid atau rusak');
     }
 
-    // Clear existing docs in each collection
     const clearCollection = async (collName: string) => {
       const snap = await getDocs(collection(db, collName));
       for (const d of snap.docs) {
@@ -749,32 +571,26 @@ export const storageService = {
     await clearCollection(COLLECTIONS.BUDGETS);
     await clearCollection(COLLECTIONS.RECURRING);
 
-    // Save categories
     for (const cat of backup.categories) {
       await this.saveCategory(cat);
     }
 
-    // Save payment methods
     for (const pm of (backup.paymentMethods || [])) {
       await this.savePaymentMethod(pm);
     }
 
-    // Save transactions
     for (const tx of backup.transactions) {
       await this.saveTransaction(tx);
     }
 
-    // Save budgets
     for (const b of (backup.budgets || [])) {
       await this.saveBudget(b);
     }
 
-    // Save recurring
     for (const rec of (backup.recurringTransactions || [])) {
       await this.saveRecurringTransaction(rec);
     }
 
-    // Update profile if included
     if (backup.userProfile) {
       const currentProfile = await this.getProfile();
       if (currentProfile) {
@@ -866,7 +682,6 @@ export const storageService = {
     await clearCollection(COLLECTIONS.RECURRING);
     await deleteDoc(doc(db, COLLECTIONS.PROFILE, 'owner_1'));
 
-    // Re-populate clean default categories
     const now = new Date().toISOString();
     let catIndex = 1;
     for (const item of DEFAULT_EXPENSE_CATEGORIES) {
@@ -892,7 +707,6 @@ export const storageService = {
       });
     }
 
-    // Re-populate clean default payment methods
     let pmIndex = 1;
     for (const pm of DEFAULT_PAYMENT_METHODS) {
       const id = `pm_${pmIndex++}`;
@@ -905,7 +719,6 @@ export const storageService = {
       });
     }
 
-    // Clear local session markers
     localStorage.removeItem('dompet_omti_session');
     localStorage.removeItem('dompet_omti_theme');
   },

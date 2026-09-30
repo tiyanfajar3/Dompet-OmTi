@@ -33,6 +33,8 @@ interface AppContextType {
   addTransaction: (data: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Transaction>;
   updateTransaction: (data: Transaction) => Promise<Transaction>;
   deleteTransaction: (id: string) => Promise<void>;
+  firestoreError: string | null;
+  clearFirestoreError: () => void;
 
   // Categories
   categories: Category[];
@@ -83,6 +85,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [firestoreError, setFirestoreError] = useState<string | null>(null);
 
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -106,6 +109,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [modalDefaultType, setModalDefaultType] = useState<TransactionType>('expense');
+
+  const clearFirestoreError = useCallback(() => {
+    setFirestoreError(null);
+  }, []);
 
   // Apply Theme class to HTML element
   const applyTheme = useCallback((mode: ThemeMode) => {
@@ -143,9 +150,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [applyTheme, profile]);
 
-  // Load all data
+  // Load all data directly from Firestore
   const refreshData = useCallback(async () => {
     try {
+      setFirestoreError(null);
       const [p, txs, cats, pms, bgs, recs] = await Promise.all([
         storageService.getProfile(),
         storageService.getTransactions(),
@@ -157,7 +165,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       if (p) {
         setProfile(p);
-        // If theme saved in localStorage exists, it takes precedence or sync
         const savedTheme = localStorage.getItem(THEME_KEY) as ThemeMode;
         const activeThemeMode = savedTheme || p.theme || 'system';
         setThemeState(activeThemeMode);
@@ -171,51 +178,71 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setPaymentMethods(pms);
       setBudgets(bgs);
       setRecurringTransactions(recs);
-    } catch (err) {
-      console.error('Error refreshing data from storage:', err);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gagal menyinkronkan data dengan Cloud Firestore.';
+      console.error('Error refreshing data from Firestore:', err);
+      setFirestoreError(msg);
     }
   }, [applyTheme]);
 
   // Initial Load, Auth Session Check & Firestore Realtime Sync
   useEffect(() => {
+    let isMounted = true;
     let unsubs: Array<() => void> = [];
 
     const init = async () => {
       setIsLoading(true);
       try {
         await initializeDatabase();
+        if (!isMounted) return;
         await refreshData();
 
         // Check active session in localStorage
         const storedSession = localStorage.getItem(SESSION_KEY);
         if (storedSession) {
-          const session = JSON.parse(storedSession);
-          if (session && session.userId && session.expiresAt > Date.now()) {
-            setIsAuthenticated(true);
-          } else {
+          try {
+            const session = JSON.parse(storedSession);
+            if (session && session.userId && session.expiresAt > Date.now()) {
+              setIsAuthenticated(true);
+            } else {
+              localStorage.removeItem(SESSION_KEY);
+              setIsAuthenticated(false);
+            }
+          } catch {
             localStorage.removeItem(SESSION_KEY);
             setIsAuthenticated(false);
           }
         }
 
         // Attach Realtime Subscriptions so data stays automatically synchronized across devices
-        const unsubTx = storageService.subscribeTransactions((txs) => {
-          setTransactions(txs);
-        });
+        const unsubTx = storageService.subscribeTransactions(
+          (txs) => {
+            if (isMounted) {
+              setTransactions(txs);
+              setFirestoreError(null);
+            }
+          },
+          (err) => {
+            if (isMounted) {
+              setFirestoreError(err.message);
+            }
+          }
+        );
+
         const unsubCat = storageService.subscribeCategories((cats) => {
-          setCategories(cats);
+          if (isMounted) setCategories(cats);
         });
         const unsubPm = storageService.subscribePaymentMethods((pms) => {
-          setPaymentMethods(pms);
+          if (isMounted) setPaymentMethods(pms);
         });
         const unsubBg = storageService.subscribeBudgets((bgs) => {
-          setBudgets(bgs);
+          if (isMounted) setBudgets(bgs);
         });
         const unsubRec = storageService.subscribeRecurringTransactions((recs) => {
-          setRecurringTransactions(recs);
+          if (isMounted) setRecurringTransactions(recs);
         });
         const unsubProf = storageService.subscribeProfile((p) => {
-          if (p) {
+          if (isMounted && p) {
             setProfile(p);
             const savedTheme = localStorage.getItem(THEME_KEY) as ThemeMode;
             const activeThemeMode = savedTheme || p.theme || 'system';
@@ -225,19 +252,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         });
 
         unsubs = [unsubTx, unsubCat, unsubPm, unsubBg, unsubRec, unsubProf];
-      } catch (e) {
+      } catch (e: unknown) {
         console.error('Failed to initialize Dompet Omti Firestore database:', e);
+        if (isMounted) {
+          const msg = e instanceof Error ? e.message : 'Gagal menginisialisasi koneksi Cloud Firestore.';
+          setFirestoreError(msg);
+        }
       } finally {
-        setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     };
 
     init();
 
     return () => {
-      unsubs.forEach(unsub => unsub());
+      isMounted = false;
+      unsubs.forEach(unsub => {
+        try {
+          unsub();
+        } catch {}
+      });
     };
-  }, [refreshData, applyTheme]);
+  }, []); // Run once on mount to prevent duplicate listeners
 
   // Listen to system dark mode preference changes
   useEffect(() => {
@@ -394,39 +432,94 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // Transactions CRUD
+  // Transactions CRUD backed by Cloud Firestore
   const addTransaction = async (
     data: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'>
   ): Promise<Transaction> => {
+    if (data.amount <= 0) {
+      throw new Error('Nominal transaksi harus lebih dari Rp 0.');
+    }
+    if (!data.date) {
+      throw new Error('Tanggal transaksi wajib diisi.');
+    }
+    if (!data.categoryId) {
+      throw new Error('Kategori transaksi wajib dipilih.');
+    }
+
     const now = new Date().toISOString();
     const cat = categories.find(c => c.id === data.categoryId);
+    const catName = cat?.name || data.categoryName || 'Lainnya';
+    const newDocId = `tx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
     const newTx: Transaction = {
       ...data,
-      id: `tx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      categoryName: cat?.name || data.categoryName || 'Lainnya',
+      id: newDocId,
+      categoryId: data.categoryId,
+      categoryName: catName,
       createdAt: now,
       updatedAt: now,
     };
+
+    // Save directly to Cloud Firestore document first; throws on failure
     await storageService.saveTransaction(newTx);
-    await refreshData();
+
+    // After Firestore confirms success, immediately update React state
+    setTransactions((prev) => {
+      const filtered = prev.filter((t) => t.id !== newTx.id);
+      return [newTx, ...filtered].sort((a, b) => {
+        const cmp = (b.date || '').localeCompare(a.date || '');
+        if (cmp !== 0) return cmp;
+        return (b.createdAt || '').localeCompare(a.createdAt || '');
+      });
+    });
+
     return newTx;
   };
 
   const updateTransaction = async (data: Transaction): Promise<Transaction> => {
+    if (!data.id) {
+      throw new Error('ID dokumen transaksi tidak ditemukan untuk diubah.');
+    }
+    if (data.amount <= 0) {
+      throw new Error('Nominal transaksi harus lebih dari Rp 0.');
+    }
+    if (!data.date) {
+      throw new Error('Tanggal transaksi wajib diisi.');
+    }
+
     const cat = categories.find(c => c.id === data.categoryId);
+    const catName = cat?.name || data.categoryName || 'Lainnya';
     const updatedTx: Transaction = {
       ...data,
-      categoryName: cat?.name || data.categoryName || 'Lainnya',
+      categoryName: catName,
       updatedAt: new Date().toISOString(),
     };
+
+    // Save update to Cloud Firestore document; throws on failure
     await storageService.saveTransaction(updatedTx);
-    await refreshData();
+
+    // After Firestore confirms success, immediately update React state
+    setTransactions((prev) =>
+      prev.map((t) => (t.id === data.id ? updatedTx : t)).sort((a, b) => {
+        const cmp = (b.date || '').localeCompare(a.date || '');
+        if (cmp !== 0) return cmp;
+        return (b.createdAt || '').localeCompare(a.createdAt || '');
+      })
+    );
+
     return updatedTx;
   };
 
   const deleteTransaction = async (id: string): Promise<void> => {
+    if (!id) {
+      throw new Error('ID transaksi tidak valid untuk dihapus.');
+    }
+
+    // Delete directly from Cloud Firestore document; throws on failure
     await storageService.deleteTransaction(id);
-    await refreshData();
+
+    // After Firestore confirms success, immediately update React state
+    setTransactions((prev) => prev.filter((t) => t.id !== id));
   };
 
   // Categories CRUD
@@ -599,6 +692,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addTransaction,
         updateTransaction,
         deleteTransaction,
+        firestoreError,
+        clearFirestoreError,
         categories,
         addCategory,
         updateCategory,

@@ -49,6 +49,8 @@ export const TransactionListPage: React.FC = () => {
 
   // Modals
   const [deletingTx, setDeletingTx] = useState<Transaction | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [detailTx, setDetailTx] = useState<Transaction | null>(null);
   const [selectedReceipts, setSelectedReceipts] = useState<ReceiptImage[]>([]);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
@@ -168,8 +170,17 @@ export const TransactionListPage: React.FC = () => {
 
   const handleConfirmDelete = async () => {
     if (deletingTx) {
-      await deleteTransaction(deletingTx.id);
-      setDeletingTx(null);
+      setIsDeleting(true);
+      setDeleteError(null);
+      try {
+        await deleteTransaction(deletingTx.id);
+        setDeletingTx(null);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Transaksi gagal dihapus dari database.';
+        setDeleteError(msg);
+      } finally {
+        setIsDeleting(false);
+      }
     }
   };
 
@@ -632,21 +643,36 @@ export const TransactionListPage: React.FC = () => {
               Hapus Transaksi Ini, Tuan Muda?
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
-              Transaksi <strong className="text-slate-800 dark:text-slate-200">{deletingTx.description || deletingTx.categoryName}</strong> senilai <strong className="text-slate-800 dark:text-slate-200">{formatRupiah(deletingTx.amount)}</strong> akan dihapus permanen dari brankas.
+              Transaksi <strong className="text-slate-800 dark:text-slate-200">{deletingTx.description || deletingTx.categoryName}</strong> senilai <strong className="text-slate-800 dark:text-slate-200">{formatRupiah(deletingTx.amount)}</strong> akan dihapus permanen dari brankas Cloud Firestore.
             </p>
+
+            {deleteError && (
+              <div className="mt-3 p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-900/60 text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{deleteError}</span>
+              </div>
+            )}
 
             <div className="mt-6 flex items-center justify-end gap-2.5">
               <button
-                onClick={() => setDeletingTx(null)}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition"
+                onClick={() => {
+                  setDeletingTx(null);
+                  setDeleteError(null);
+                }}
+                disabled={isDeleting}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition disabled:opacity-50 cursor-pointer"
               >
                 Batal
               </button>
               <button
                 onClick={handleConfirmDelete}
-                className="px-4 py-2 text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white rounded-xl transition cursor-pointer"
+                disabled={isDeleting}
+                className="px-4 py-2 text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white rounded-xl transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1.5"
               >
-                Ya, Hapus
+                {isDeleting && (
+                  <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                )}
+                <span>{isDeleting ? 'Menghapus...' : 'Ya, Hapus'}</span>
               </button>
             </div>
           </div>
