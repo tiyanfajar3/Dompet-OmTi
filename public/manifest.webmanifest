@@ -1,0 +1,20 @@
+{
+  "id": "/",
+  "name": "Dompet Omti - Keuangan Pribadi",
+  "short_name": "Dompet Omti",
+  "description": "Catat pemasukan, pengeluaran, struk belanja, dan pantau anggaran Tuan Muda.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

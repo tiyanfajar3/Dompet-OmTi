@@ -1,0 +1,291 @@
+{
+  "entities": {
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Financial transaction record for Dompet Omti",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique transaction ID"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["income", "expense"],
+          "description": "Income or expense type"
+        },
+        "categoryId": {
+          "type": "string",
+          "description": "Referenced category ID"
+        },
+        "categoryName": {
+          "type": "string",
+          "description": "Display name of the category"
+        },
+        "amount": {
+          "type": "number",
+          "description": "Amount in Indonesian Rupiah"
+        },
+        "date": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "description": "Date of transaction in YYYY-MM-DD"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Note or description of transaction"
+        },
+        "paymentMethod": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Payment method used"
+        },
+        "receiptImages": {
+          "type": "array",
+          "description": "Array of receipt photos"
+        },
+        "isRecurringInstance": {
+          "type": "boolean",
+          "description": "Whether created by recurring schedule"
+        },
+        "recurringId": {
+          "type": "string",
+          "description": "Optional ID of source recurring template"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp created"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp updated"
+        }
+      },
+      "required": ["id", "type", "categoryId", "amount", "date", "description", "paymentMethod", "createdAt", "updatedAt"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Transaction category classification",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique category identifier"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Category name"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["income", "expense"],
+          "description": "Income or expense"
+        },
+        "icon": {
+          "type": "string",
+          "description": "Lucide icon name"
+        },
+        "color": {
+          "type": "string",
+          "description": "Hex color code"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp created"
+        }
+      },
+      "required": ["id", "name", "type", "createdAt"]
+    },
+    "PaymentMethod": {
+      "title": "PaymentMethod",
+      "description": "Payment method for transactions",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique payment method identifier"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Method name"
+        },
+        "icon": {
+          "type": "string",
+          "description": "Icon identifier"
+        },
+        "isCustom": {
+          "type": "boolean",
+          "description": "Whether user created"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp created"
+        }
+      },
+      "required": ["id", "name", "createdAt"]
+    },
+    "Budget": {
+      "title": "Budget",
+      "description": "Budget limit for category",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique budget identifier"
+        },
+        "categoryId": {
+          "type": "string",
+          "description": "Referenced category ID"
+        },
+        "amount": {
+          "type": "number",
+          "description": "Monthly budget amount limit"
+        },
+        "period": {
+          "type": "string",
+          "enum": ["monthly"],
+          "description": "Budget recurrence period"
+        }
+      },
+      "required": ["id", "categoryId", "amount", "period"]
+    },
+    "RecurringTransaction": {
+      "title": "RecurringTransaction",
+      "description": "Automated recurring routine transaction template",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique recurring item ID"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Recurring schedule name"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["income", "expense"],
+          "description": "Transaction type"
+        },
+        "categoryId": {
+          "type": "string",
+          "description": "Category ID"
+        },
+        "amount": {
+          "type": "number",
+          "description": "Routine amount"
+        },
+        "paymentMethod": {
+          "type": "string",
+          "description": "Payment method"
+        },
+        "frequency": {
+          "type": "string",
+          "enum": ["daily", "weekly", "monthly", "yearly"],
+          "description": "Recurrence frequency"
+        },
+        "startDate": {
+          "type": "string",
+          "description": "Starting date"
+        },
+        "active": {
+          "type": "boolean",
+          "description": "Active status"
+        },
+        "lastExecutedDate": {
+          "type": "string",
+          "description": "Last execution date"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp created"
+        }
+      },
+      "required": ["id", "name", "type", "categoryId", "amount", "frequency", "startDate", "active", "createdAt"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Single owner profile and security credentials",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Owner identifier"
+        },
+        "username": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Owner username"
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 50,
+          "description": "Owner display name"
+        },
+        "profilePhoto": {
+          "type": "string",
+          "description": "Profile picture base64 or url"
+        },
+        "passwordHash": {
+          "type": "string",
+          "description": "Secure hashed password"
+        },
+        "salt": {
+          "type": "string",
+          "description": "Cryptographic salt"
+        },
+        "theme": {
+          "type": "string",
+          "enum": ["light", "dark", "system"],
+          "description": "Theme preference"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp created"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp updated"
+        }
+      },
+      "required": ["id", "username", "displayName", "passwordHash", "salt", "theme", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Collection of all financial transaction records"
+    },
+    "/categories/{categoryId}": {
+      "schema": "Category",
+      "description": "Collection of income and expense categories"
+    },
+    "/payment_methods/{paymentMethodId}": {
+      "schema": "PaymentMethod",
+      "description": "Collection of payment methods"
+    },
+    "/budgets/{budgetId}": {
+      "schema": "Budget",
+      "description": "Collection of category budget limits"
+    },
+    "/recurring_transactions/{recurringId}": {
+      "schema": "RecurringTransaction",
+      "description": "Collection of recurring transaction templates"
+    },
+    "/user_profile/{profileId}": {
+      "schema": "UserProfile",
+      "description": "Owner profile and security brankas credentials"
+    }
+  }
+}
