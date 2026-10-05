@@ -12,19 +12,49 @@ import {
   ArrowRight,
   PieChart as PieIcon,
   Layers,
-  ChevronDown
+  ChevronDown,
+  Building2,
+  Users
 } from 'lucide-react';
 import { 
   formatRupiah, 
   formatIndonesianDate, 
-  formatIndonesianMonthYear 
+  formatIndonesianMonthYear,
+  parseFlexibleDate 
 } from '../../lib/formatters';
 import { Transaction } from '../../types';
+import { storageService } from '../../lib/storage';
 
 type ReportPeriod = 'today' | 'this_week' | 'this_month' | 'this_year' | 'custom';
 
 export const ReportsPage: React.FC = () => {
-  const { transactions, categories } = useApp();
+  const { 
+    profile,
+    users,
+    transactions, 
+    categories,
+    selectedAccountFilter,
+    setSelectedAccountFilter 
+  } = useApp();
+
+  const isAdmin = profile?.role === 'admin';
+  const adminId = profile?.id || 'owner_1';
+  const isTargetingAdmin = selectedAccountFilter === adminId || selectedAccountFilter === 'owner_1';
+
+  // Daftar akun cabang (selain akun Super Admin)
+  const branchUsers = useMemo(() => {
+    return users.filter((u) => u.id !== adminId && u.id !== 'owner_1');
+  }, [users, adminId]);
+
+  // Label nama akun aktif untuk keterangan ringkasan laporan
+  const activeAccountName = useMemo(() => {
+    if (selectedAccountFilter === 'all') return 'Semua Akun / Cabang (Konsolidasi)';
+    if (isTargetingAdmin) {
+      return `${profile?.displayName || 'Tuan Muda'} (Kas Pribadi Admin)`;
+    }
+    const matched = users.find((u) => u.id === selectedAccountFilter);
+    return matched ? `${matched.displayName} (@${matched.username})` : `Cabang (${selectedAccountFilter})`;
+  }, [selectedAccountFilter, isTargetingAdmin, profile, users]);
 
   const [period, setPeriod] = useState<ReportPeriod>('this_month');
   const [customStart, setCustomStart] = useState('');
@@ -120,9 +150,20 @@ export const ReportsPage: React.FC = () => {
     };
   }, [period, currentYear, currentMonth, customStart, customEnd]);
 
+  // Transaksi aktif yang strictly difilter berdasarkan akun terpilih
+  const activeReportTransactions = useMemo(() => {
+    if (!isAdmin) return transactions;
+    if (selectedAccountFilter === 'all') return transactions;
+    return transactions.filter((tx) => storageService.matchesAccount(tx, selectedAccountFilter, profile?.id));
+  }, [transactions, isAdmin, selectedAccountFilter, profile?.id]);
+
   // Compute Stats for a given range
   const computeStatsForRange = (start: string, end: string) => {
-    const list = transactions.filter((tx) => tx.date >= start && tx.date <= end);
+    const list = activeReportTransactions.filter((tx) => {
+      const parsed = parseFlexibleDate(tx.date || tx.createdAt);
+      if (!parsed) return false;
+      return parsed.dateStr >= start && parsed.dateStr <= end;
+    });
     let income = 0;
     let expense = 0;
     let largestExpense = 0;
@@ -234,6 +275,74 @@ export const ReportsPage: React.FC = () => {
           ))}
         </div>
       </div>
+
+      {/* Account / Vault Selector (Khusus Admin Dropdown, Non-Admin Info Card) */}
+      {isAdmin ? (
+        <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-emerald-200/90 dark:border-emerald-900/60 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3 bg-gradient-to-r from-emerald-50/50 via-white to-slate-50/50 dark:from-emerald-950/20 dark:via-slate-900 dark:to-slate-900">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 flex items-center justify-center shrink-0 shadow-2xs">
+              <Building2 className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-900 dark:text-white">
+                  Filter Akun Laporan Keuangan
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                  Akses Admin
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                {selectedAccountFilter === 'all'
+                  ? 'Menampilkan laporan keuangan konsolidasi dari SELURUH cabang/akun'
+                  : isTargetingAdmin
+                    ? 'Default: Hanya menampilkan laporan Kas Pribadi Admin (bersih dari transaksi cabang)'
+                    : `Menampilkan laporan keuangan khusus cabang: ${activeAccountName}`}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-stretch md:self-auto">
+            <select
+              value={selectedAccountFilter}
+              onChange={(e) => setSelectedAccountFilter(e.target.value)}
+              className="w-full md:w-auto px-3.5 py-2 text-xs font-semibold bg-white dark:bg-slate-800 border-2 border-emerald-500/70 dark:border-emerald-500/60 rounded-xl text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-emerald-500 shadow-xs cursor-pointer"
+            >
+              <optgroup label="Akun Admin (Default)">
+                <option value="owner_1">
+                  👤 {profile?.displayName || 'Tuan Muda'} (Kas Pribadi Admin)
+                </option>
+              </optgroup>
+              <optgroup label="Konsolidasi Seluruh Akun">
+                <option value="all">
+                  🌐 Semua Akun / Cabang (Konsolidasi Global)
+                </option>
+              </optgroup>
+              {branchUsers.length > 0 && (
+                <optgroup label="Akun Cabang / Tenant Tertentu">
+                  {branchUsers.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      🏢 {u.displayName} (@{u.username})
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+          </div>
+        </div>
+      ) : (
+        <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs flex items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2.5">
+            <Building2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <span className="font-semibold text-slate-800 dark:text-slate-200">
+              Laporan Keuangan Cabang: {profile?.displayName}
+            </span>
+          </div>
+          <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+            Terisolasi
+          </span>
+        </div>
+      )}
 
       {/* Custom Date Range Picker if active */}
       {period === 'custom' && (

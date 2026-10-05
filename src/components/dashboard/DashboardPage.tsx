@@ -15,32 +15,67 @@ import {
   Activity,
   Layers,
   Sparkles,
-  HandCoins
+  HandCoins,
+  Building2,
+  Users,
+  ShieldCheck
 } from 'lucide-react';
 import { 
   formatRupiah, 
   getGreetingForTuanMuda, 
   formatIndonesianDate, 
-  formatIndonesianMonthYear 
+  formatIndonesianMonthYear,
+  parseFlexibleDate
 } from '../../lib/formatters';
 import { CategoryIcon } from '../common/CategoryIcon';
 import { ReceiptViewerModal } from '../common/ReceiptViewerModal';
 import { ReceiptImage, Transaction } from '../../types';
+import { storageService } from '../../lib/storage';
 
 export const DashboardPage: React.FC = () => {
   const { 
     profile, 
+    users,
     transactions, 
     categories, 
     budgets, 
     debts,
     openAddModal, 
-    setActiveTab 
+    setActiveTab,
+    selectedAccountFilter,
+    setSelectedAccountFilter
   } = useApp();
 
   const [selectedReceipts, setSelectedReceipts] = useState<ReceiptImage[]>([]);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
   const [receiptTitle, setReceiptTitle] = useState('Bukti Struk');
+
+  // Akun Admin & Branch resolution
+  const isAdmin = profile?.role === 'admin';
+  const adminId = profile?.id || 'owner_1';
+  const isTargetingAdmin = selectedAccountFilter === adminId || selectedAccountFilter === 'owner_1';
+
+  // Daftar akun cabang (selain akun Super Admin)
+  const branchUsers = useMemo(() => {
+    return users.filter((u) => u.id !== adminId && u.id !== 'owner_1');
+  }, [users, adminId]);
+
+  // Label nama akun aktif untuk keterangan ringkasan
+  const activeAccountName = useMemo(() => {
+    if (selectedAccountFilter === 'all') return 'Semua Akun / Cabang (Konsolidasi)';
+    if (isTargetingAdmin) {
+      return `${profile?.displayName || 'Tuan Muda'} (Kas Pribadi Admin)`;
+    }
+    const matched = users.find((u) => u.id === selectedAccountFilter);
+    return matched ? `${matched.displayName} (@${matched.username})` : `Cabang (${selectedAccountFilter})`;
+  }, [selectedAccountFilter, isTargetingAdmin, profile, users]);
+
+  const activeAccountShortName = useMemo(() => {
+    if (selectedAccountFilter === 'all') return 'Semua Akun';
+    if (isTargetingAdmin) return 'Kas Pribadi';
+    const matched = users.find((u) => u.id === selectedAccountFilter);
+    return matched ? matched.displayName : 'Cabang';
+  }, [selectedAccountFilter, isTargetingAdmin, users]);
 
   // Debts statistics for dashboard reminder
   const unpaidDebts = useMemo(() => debts.filter(d => d.status === 'unpaid'), [debts]);
@@ -53,29 +88,34 @@ export const DashboardPage: React.FC = () => {
   const currentYear = today.getFullYear();
   const currentMonth = today.getMonth() + 1; // 1-12
 
-  // Filter transactions for the current month
-  const currentMonthTransactions = useMemo(() => {
-    return transactions.filter((tx) => {
-      const parts = tx.date.split('-');
-      if (parts.length < 2) return false;
-      const y = parseInt(parts[0], 10);
-      const m = parseInt(parts[1], 10);
-      return y === currentYear && m === currentMonth;
-    });
-  }, [transactions, currentYear, currentMonth]);
+  // Transaksi aktif yang strictly difilter berdasarkan selectedAccountFilter untuk isolasi per akun yang presisi
+  const activeAccountTransactions = useMemo(() => {
+    if (!isAdmin) return transactions;
+    if (selectedAccountFilter === 'all') return transactions;
+    return transactions.filter((tx) => storageService.matchesAccount(tx, selectedAccountFilter, profile?.id));
+  }, [transactions, isAdmin, selectedAccountFilter, profile?.id]);
 
-  // Overall Financial Calculations
+  // Filter transaksi untuk bulan berjalan (Oktober 2026) DAN akun aktif terpilih
+  const currentMonthTransactions = useMemo(() => {
+    return activeAccountTransactions.filter((tx) => {
+      const parsed = parseFlexibleDate(tx.date || tx.createdAt);
+      if (!parsed) return false;
+      return parsed.year === currentYear && parsed.month === currentMonth;
+    });
+  }, [activeAccountTransactions, currentYear, currentMonth]);
+
+  // Overall Financial Calculations khusus akun aktif terpilih
   const stats = useMemo(() => {
-    // All-time balance
+    // Saldo Brankas Saat Ini: Akumulasi All-Time Net Balance khusus akun aktif
     let allTimeIncome = 0;
     let allTimeExpense = 0;
-    transactions.forEach((tx) => {
+    activeAccountTransactions.forEach((tx) => {
       if (tx.type === 'income') allTimeIncome += tx.amount;
       else allTimeExpense += tx.amount;
     });
     const currentBalance = allTimeIncome - allTimeExpense;
 
-    // This month income & expense
+    // Pemasukan & Pengeluaran Bulan Ini: Khusus bulan berjalan DAN akun aktif
     let monthIncome = 0;
     let monthExpense = 0;
     let largestExpenseAmount = 0;
@@ -145,7 +185,7 @@ export const DashboardPage: React.FC = () => {
       budgetedExpense,
       budgetPercent,
     };
-  }, [transactions, currentMonthTransactions, categories, budgets]);
+  }, [activeAccountTransactions, currentMonthTransactions, categories, budgets]);
 
   // Top 5 Largest Expenses this month
   const top5Expenses = useMemo(() => {
@@ -165,7 +205,8 @@ export const DashboardPage: React.FC = () => {
 
     currentMonthTransactions.forEach((tx) => {
       if (tx.type === 'expense') {
-        const d = parseInt(tx.date.split('-')[2], 10);
+        const parsed = parseFlexibleDate(tx.date || tx.createdAt);
+        const d = parsed ? parsed.day : parseInt(String(tx.date).split('-')[2], 10);
         if (d >= 1 && d <= daysInMonth) {
           days[d - 1].amount += tx.amount;
         }
@@ -178,8 +219,8 @@ export const DashboardPage: React.FC = () => {
 
   // Recent 5 Transactions
   const recentTransactions = useMemo(() => {
-    return transactions.slice(0, 5);
-  }, [transactions]);
+    return activeAccountTransactions.slice(0, 5);
+  }, [activeAccountTransactions]);
 
   const viewReceipt = (tx: Transaction) => {
     if (tx.receiptImages && tx.receiptImages.length > 0) {
@@ -205,13 +246,22 @@ export const DashboardPage: React.FC = () => {
         <div className="relative z-10">
           <div className="flex items-center gap-2 text-emerald-400 text-xs font-semibold uppercase tracking-wider mb-1">
             <Sparkles className="w-3.5 h-3.5" />
-            <span>Brankas Pribadi &middot; {formatIndonesianMonthYear(currentYear, currentMonth)}</span>
+            <span>
+              {selectedAccountFilter === 'all'
+                ? 'Konsolidasi Global'
+                : isTargetingAdmin
+                  ? 'Brankas Pribadi'
+                  : `Brankas: ${activeAccountShortName}`}
+              {' · '}
+              {formatIndonesianMonthYear(currentYear, currentMonth)}
+            </span>
           </div>
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
             {greeting}
           </h1>
           <p className="text-xs sm:text-sm text-slate-300 mt-1 max-w-xl">
-            {periodText} Berikut rangkuman pergerakan kas dan alokasi dana Anda bulan ini.
+            {periodText} Berikut rangkuman pergerakan kas dan alokasi dana{' '}
+            {selectedAccountFilter === 'all' ? 'seluruh cabang' : activeAccountShortName} bulan ini.
           </p>
         </div>
 
@@ -232,6 +282,83 @@ export const DashboardPage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Account / Vault Selector (Khusus Admin Dropdown, Non-Admin Info Card) */}
+      {isAdmin ? (
+        <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-emerald-200/90 dark:border-emerald-900/60 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-emerald-50/40 via-white to-slate-50/40 dark:from-emerald-950/20 dark:via-slate-900 dark:to-slate-900">
+          <div className="flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 flex items-center justify-center shrink-0 shadow-2xs">
+              <Building2 className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold text-slate-900 dark:text-white">
+                  Pilihan Akun / Brankas Aktif
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                  Akses Admin
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                {selectedAccountFilter === 'all'
+                  ? '🌐 Mode Konsolidasi: Menampilkan saldo & ringkasan dari SEMUA akun/cabang'
+                  : isTargetingAdmin
+                    ? '👤 Default: Hanya menampilkan saldo & transaksi Kas Pribadi Admin (bersih dari cabang)'
+                    : `🏢 Menampilkan ringkasan saldo & transaksi khusus cabang: ${activeAccountName}`}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-stretch md:self-auto">
+            <select
+              value={selectedAccountFilter}
+              onChange={(e) => setSelectedAccountFilter(e.target.value)}
+              className="w-full md:w-auto px-4 py-2.5 text-xs font-semibold bg-white dark:bg-slate-800 border-2 border-emerald-500/70 dark:border-emerald-500/60 rounded-xl text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-emerald-500 shadow-xs cursor-pointer"
+            >
+              <optgroup label="Akun Admin (Default)">
+                <option value="owner_1">
+                  👤 {profile?.displayName || 'Tuan Muda'} (Kas Pribadi Admin)
+                </option>
+              </optgroup>
+              <optgroup label="Konsolidasi Seluruh Akun">
+                <option value="all">
+                  🌐 Semua Akun / Brankas (Konsolidasi Global)
+                </option>
+              </optgroup>
+              {branchUsers.length > 0 && (
+                <optgroup label="Akun Cabang / Tenant Tertentu">
+                  {branchUsers.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      🏢 {u.displayName} (@{u.username})
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+          </div>
+        </div>
+      ) : (
+        <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center shrink-0">
+              <Building2 className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-900 dark:text-white">
+                  {profile?.displayName || 'Cabang'}
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+                  Akun Cabang Terisolasi
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                Data ringkasan saldo dan transaksi terisolasi secara privat untuk cabang ini.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Unpaid Debts Reminder Banner */}
       {unpaidDebts.length > 0 && (
@@ -272,8 +399,12 @@ export const DashboardPage: React.FC = () => {
           <div className="text-2xl font-bold tracking-tight tabular-nums text-slate-900 dark:text-white">
             {formatRupiah(stats.currentBalance)}
           </div>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
-            Akumulasi seluruh arus kas aktif
+          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 truncate">
+            {selectedAccountFilter === 'all'
+              ? 'Akumulasi total seluruh akun & cabang'
+              : isTargetingAdmin
+                ? 'Akumulasi kas pribadi Tuan Muda'
+                : `Akumulasi saldo kas: ${activeAccountShortName}`}
           </p>
         </div>
 
@@ -288,8 +419,10 @@ export const DashboardPage: React.FC = () => {
           <div className="text-2xl font-bold tracking-tight tabular-nums text-emerald-600 dark:text-emerald-400">
             {formatRupiah(stats.monthIncome)}
           </div>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
-            Periode {formatIndonesianMonthYear(currentYear, currentMonth)}
+          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 truncate">
+            {selectedAccountFilter === 'all'
+              ? `Konsolidasi seluruh akun · ${formatIndonesianMonthYear(currentYear, currentMonth)}`
+              : `${activeAccountShortName} · ${formatIndonesianMonthYear(currentYear, currentMonth)}`}
           </p>
         </div>
 
@@ -304,8 +437,10 @@ export const DashboardPage: React.FC = () => {
           <div className="text-2xl font-bold tracking-tight tabular-nums text-rose-600 dark:text-rose-400">
             {formatRupiah(stats.monthExpense)}
           </div>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
-            Total biaya operasional & pribadi
+          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 truncate">
+            {selectedAccountFilter === 'all'
+              ? 'Biaya gabungan seluruh cabang'
+              : `Biaya operasional: ${activeAccountShortName}`}
           </p>
         </div>
 
@@ -724,6 +859,14 @@ export const DashboardPage: React.FC = () => {
                       {tx.description || tx.categoryName || 'Transaksi'}
                     </div>
                     <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      {isAdmin && selectedAccountFilter === 'all' && (
+                        <>
+                          <span className="px-1.5 py-0.5 rounded-sm bg-slate-100 dark:bg-slate-800 text-[10px] text-slate-600 dark:text-slate-300 font-medium">
+                            {(tx.userId === 'owner_1' || tx.userId === profile?.id) ? 'Admin' : (users.find(u => u.id === tx.userId)?.displayName || 'Cabang')}
+                          </span>
+                          <span>&middot;</span>
+                        </>
+                      )}
                       <span>{formatIndonesianDate(tx.date, { shortMonth: true })}</span>
                       <span>&middot;</span>
                       <span>{tx.categoryName || 'Kategori'}</span>

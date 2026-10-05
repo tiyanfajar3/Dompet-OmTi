@@ -15,13 +15,17 @@ import {
   Calculator
 } from 'lucide-react';
 import { TransactionType, ReceiptImage } from '../../types';
-import { formatRupiah, parseRupiahInput, getTodayDateString } from '../../lib/formatters';
+import { formatRupiah, parseRupiahInput, getTodayDateString, normalizeStandardDate } from '../../lib/formatters';
 import { compressImage } from '../../lib/imageCompressor';
 import { CategoryIcon } from '../common/CategoryIcon';
 import { MiniCalculator } from './MiniCalculator';
+import { storageService } from '../../lib/storage';
 
 export const TransactionFormModal: React.FC = () => {
   const {
+    profile,
+    users,
+    selectedAccountFilter,
     isAddModalOpen,
     closeAddModal,
     modalDefaultType,
@@ -35,6 +39,7 @@ export const TransactionFormModal: React.FC = () => {
   } = useApp();
 
   const [type, setType] = useState<TransactionType>(modalDefaultType);
+  const [targetUserId, setTargetUserId] = useState<string>('owner_1');
   const [nominalDisplay, setNominalDisplay] = useState<string>('');
   const [amount, setAmount] = useState<number>(0);
   const [date, setDate] = useState<string>(getTodayDateString());
@@ -65,11 +70,14 @@ export const TransactionFormModal: React.FC = () => {
         setType(editingTransaction.type);
         setAmount(editingTransaction.amount);
         setNominalDisplay(editingTransaction.amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.'));
-        setDate(editingTransaction.date);
+        setDate(normalizeStandardDate(editingTransaction.date));
         setCategoryId(editingTransaction.categoryId);
         setPaymentMethod(editingTransaction.paymentMethod || 'Cash');
         setDescription(editingTransaction.description || '');
         setReceiptImages(editingTransaction.receiptImages || []);
+        const acc = storageService.getTransactionAccountId(editingTransaction, profile?.id);
+        const isDefault = storageService.isDefaultAdminAccount(acc, profile?.id);
+        setTargetUserId(isDefault ? 'owner_1' : acc);
       } else {
         setType(modalDefaultType);
         setAmount(0);
@@ -81,11 +89,16 @@ export const TransactionFormModal: React.FC = () => {
         setPaymentMethod(paymentMethods[0]?.name || 'Cash');
         setDescription('');
         setReceiptImages([]);
+        if (profile?.role === 'admin' && selectedAccountFilter && selectedAccountFilter !== 'all') {
+          setTargetUserId(selectedAccountFilter);
+        } else {
+          setTargetUserId('owner_1');
+        }
       }
       setShowCalculator(false);
       setError(null);
     }
-  }, [isAddModalOpen, editingTransaction, modalDefaultType, categories, paymentMethods]);
+  }, [isAddModalOpen, editingTransaction, modalDefaultType, categories, paymentMethods, profile, selectedAccountFilter]);
 
   // When type changes, ensure selected category matches type
   useEffect(() => {
@@ -169,28 +182,43 @@ export const TransactionFormModal: React.FC = () => {
       const selectedCat = categories.find((c) => c.id === categoryId);
       const catName = selectedCat?.name || 'Lainnya';
 
+      const finalDate = normalizeStandardDate(date);
+      const targetAcc = profile?.role === 'admin' 
+        ? targetUserId 
+        : (editingTransaction ? storageService.getTransactionAccountId(editingTransaction, profile?.id) : (profile?.id || 'owner_1'));
+      const isDefaultAccount = storageService.isDefaultAdminAccount(targetAcc, profile?.id);
+      const canonicalAccount = isDefaultAccount ? 'owner_1' : targetAcc;
+
       if (editingTransaction) {
         await updateTransaction({
           ...editingTransaction,
           type,
           amount,
-          date,
+          date: finalDate,
           categoryId,
           categoryName: catName,
           paymentMethod,
           description: description.trim(),
           receiptImages,
+          userId: canonicalAccount,
+          accountId: canonicalAccount,
+          branchId: isDefaultAccount ? undefined : canonicalAccount,
+          tenantId: canonicalAccount,
         });
       } else {
         await addTransaction({
           type,
           amount,
-          date,
+          date: finalDate,
           categoryId,
           categoryName: catName,
           paymentMethod,
           description: description.trim(),
           receiptImages,
+          userId: canonicalAccount,
+          accountId: canonicalAccount,
+          branchId: isDefaultAccount ? undefined : canonicalAccount,
+          tenantId: canonicalAccount,
         });
       }
 
@@ -295,6 +323,42 @@ export const TransactionFormModal: React.FC = () => {
               <span>Pemasukan</span>
             </button>
           </div>
+
+          {/* Akun / Brankas Target (Khusus Admin) */}
+          {profile?.role === 'admin' && (
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Akun / Brankas Pemilik Transaksi
+                </label>
+                {editingTransaction && (
+                  <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-medium">
+                    Admin: Bebas memindahkan akun
+                  </span>
+                )}
+              </div>
+              <select
+                value={targetUserId}
+                onChange={(e) => setTargetUserId(e.target.value)}
+                className="w-full px-3.5 py-2.5 text-xs font-semibold bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+              >
+                <optgroup label="Akun Admin (Default)">
+                  <option value="owner_1">
+                    👤 {profile?.displayName || 'Tuan Muda'} (Kas Pribadi Admin)
+                  </option>
+                </optgroup>
+                {users.filter(u => u.id !== profile.id && u.id !== 'owner_1').length > 0 && (
+                  <optgroup label="Akun Cabang / Tenant">
+                    {users.filter(u => u.id !== profile.id && u.id !== 'owner_1').map((u) => (
+                      <option key={u.id} value={u.id}>
+                        🏢 {u.displayName} (@{u.username})
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+            </div>
+          )}
 
           {/* Nominal Input */}
           <div>

@@ -14,6 +14,7 @@ export interface Transaction {
   userId?: string; // ID of the user who owns this transaction
   accountId?: string; // Account ID for multi-tenant isolation
   tenantId?: string; // Branch / Tenant ID
+  branchId?: string; // Branch / Tenant ID fallback
   type: TransactionType;
   categoryId: string;
   categoryName?: string; // Cache for display when category is deleted/modified

@@ -40,8 +40,6 @@ const MainLayout: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col transition-colors selection:bg-emerald-500 selection:text-white pb-24 sm:pb-28 md:pb-8">
-      <OfflineIndicator />
-
       {/* Global Firestore Error Notification */}
       {firestoreError && (
         <div className="bg-rose-500 dark:bg-rose-600 text-white px-4 py-2.5 text-xs flex items-center justify-between shadow-md transition-all">
@@ -80,6 +78,7 @@ const MainLayout: React.FC = () => {
 export default function App() {
   return (
     <AppProvider>
+      <OfflineIndicator />
       <MainLayout />
     </AppProvider>
   );

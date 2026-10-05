@@ -6,7 +6,8 @@ import {
   setDoc, 
   deleteDoc, 
   onSnapshot, 
-  writeBatch 
+  writeBatch,
+  deleteField
 } from 'firebase/firestore';
 import { 
   Category, 
@@ -21,6 +22,7 @@ import {
 } from '../types';
 import { generateSalt, hashPassword } from './crypto';
 import { db, OperationType, handleFirestoreError, testFirestoreConnection, ensureAuthenticated } from './firebase';
+import { normalizeStandardDate, normalizeStandardIso, parseFlexibleDate } from './formatters';
 
 export const COLLECTIONS = {
   TRANSACTIONS: 'transactions',
@@ -39,7 +41,12 @@ function cleanFirestoreData<T extends Record<string, any>>(obj: T): T {
     if (val !== undefined) {
       if (Array.isArray(val)) {
         clean[key] = val.map(item => (typeof item === 'object' && item !== null ? cleanFirestoreData(item) : item));
-      } else if (val !== null && typeof val === 'object' && !(val instanceof Date)) {
+      } else if (
+        val !== null && 
+        typeof val === 'object' && 
+        !(val instanceof Date) &&
+        (val.constructor === Object || !val.constructor)
+      ) {
         clean[key] = cleanFirestoreData(val);
       } else {
         clean[key] = val;
@@ -179,6 +186,139 @@ export function deleteLocalUser(userId: string): void {
   }
 }
 
+export const MAIN_ADMIN_ACCOUNT_ID = 'owner_1';
+
+// Helper periksa apakah ID merujuk ke Akun Admin / Akun Default / Pemilik
+export function isDefaultAdminAccount(id?: string | null, activeAdminId?: string): boolean {
+  if (!id) return false;
+  const clean = id.trim().toLowerCase();
+  if (clean === MAIN_ADMIN_ACCOUNT_ID || clean === 'admin' || clean === 'default' || clean === 'me') {
+    return true;
+  }
+  if (activeAdminId && id.trim() === activeAdminId.trim()) {
+    const adminClean = activeAdminId.trim().toLowerCase();
+    if (adminClean === MAIN_ADMIN_ACCOUNT_ID || adminClean === 'admin' || adminClean === 'default') {
+      return true;
+    }
+  }
+  try {
+    const sessionRaw = localStorage.getItem('dompet_omti_session');
+    if (sessionRaw) {
+      const session = JSON.parse(sessionRaw);
+      if (session && session.userId === id.trim() && session.role === 'admin') {
+        return true;
+      }
+    }
+  } catch {}
+  try {
+    const rawUsers = localStorage.getItem(LOCAL_STORAGE_USERS_KEY);
+    if (rawUsers) {
+      const users: UserProfile[] = JSON.parse(rawUsers);
+      const matched = users.find(u => u.id === id.trim());
+      if (matched && matched.role === 'admin') return true;
+    }
+  } catch {}
+  return false;
+}
+
+// Helper mendapatkan ID akun utama/default yang sedang aktif saat ini
+export function getActiveDefaultAccountId(providedId?: string): string {
+  if (providedId && providedId !== 'all' && isDefaultAdminAccount(providedId)) {
+    return providedId.trim();
+  }
+  try {
+    const sessionRaw = localStorage.getItem('dompet_omti_session');
+    if (sessionRaw) {
+      const session = JSON.parse(sessionRaw);
+      if (session && session.userId && (!session.expiresAt || session.expiresAt > Date.now())) {
+        if (session.role === 'admin' || isDefaultAdminAccount(session.userId)) {
+          return session.userId.trim();
+        }
+      }
+    }
+  } catch {}
+  return MAIN_ADMIN_ACCOUNT_ID;
+}
+
+// Helper mendapatkan accountId yang valid dari transaksi.
+// Menangani fallback data lama (single-account era) yang belum memiliki accountId.
+// Sesuai ketentuan: Transaksi lama tanpa accountId secara default masuk ke akun Admin / Kas Utama ('owner_1'),
+// BUKAN ke akun cabang/kios yang sedang dibuka (seperti Kios Sukamulya).
+export function getTransactionAccountId(tx: any, activeAccountId?: string): string {
+  const defaultAdminAccount = MAIN_ADMIN_ACCOUNT_ID;
+
+  if (!tx || typeof tx !== 'object') {
+    return defaultAdminAccount;
+  }
+
+  // 1. Cek field accountId eksplisit terlebih dahulu (primary source of truth saat akun diubah/dipindahkan)
+  const rawAcc = tx.accountId ?? tx.account_id;
+  if (rawAcc !== undefined && rawAcc !== null) {
+    const accStr = String(rawAcc).trim();
+    if (accStr !== '' && accStr !== 'null' && accStr !== 'undefined' && accStr !== 'default') {
+      if (isDefaultAdminAccount(accStr)) {
+        return defaultAdminAccount;
+      }
+      return accStr;
+    }
+  }
+
+  // 2. Cek field branchId eksplisit (jika ada transaksi cabang yang memiliki branchId spesifik)
+  const rawBranch = tx.branchId ?? tx.branch_id;
+  if (rawBranch !== undefined && rawBranch !== null) {
+    const branchStr = String(rawBranch).trim();
+    if (
+      branchStr !== '' && 
+      branchStr !== 'null' && 
+      branchStr !== 'undefined' && 
+      branchStr !== 'default' &&
+      !isDefaultAdminAccount(branchStr)
+    ) {
+      return branchStr;
+    }
+  }
+
+  // 3. Cek field tenantId eksplisit
+  const rawTenant = tx.tenantId;
+  if (rawTenant !== undefined && rawTenant !== null) {
+    const tenantStr = String(rawTenant).trim();
+    if (tenantStr !== '' && tenantStr !== 'null' && tenantStr !== 'undefined' && tenantStr !== 'default') {
+      if (isDefaultAdminAccount(tenantStr)) {
+        return defaultAdminAccount;
+      }
+      return tenantStr;
+    }
+  }
+
+  // 4. Cek field userId
+  const rawUser = tx.userId;
+  if (rawUser !== undefined && rawUser !== null) {
+    const userStr = String(rawUser).trim();
+    if (userStr !== '' && userStr !== 'null' && userStr !== 'undefined' && userStr !== 'default') {
+      if (isDefaultAdminAccount(userStr)) {
+        return defaultAdminAccount;
+      }
+      return userStr;
+    }
+  }
+
+  // 5. FALLBACK TRANSAKSI LAMA (Single-Account Era):
+  // Transaksi lama tidak memiliki accountId, branchId, atau tenantId.
+  // Secara mutlak masuk ke Akun Admin / Kas Utama ('owner_1') agar tidak salah masuk ke akun cabang/kios yang sedang dibuka!
+  return defaultAdminAccount;
+}
+
+// Helper untuk mengekstrak ID cabang spesifik dari transaksi.
+// Mengembalikan null jika transaksi milik Admin / Kas Pribadi / Transaksi warisan lama (legacy).
+export function getTransactionBranch(tx: Transaction | any, activeAdminId?: string): string | null {
+  const defaultAccount = getActiveDefaultAccountId(activeAdminId);
+  const acc = getTransactionAccountId(tx, defaultAccount);
+  if (isDefaultAdminAccount(acc, defaultAccount) || acc === MAIN_ADMIN_ACCOUNT_ID) {
+    return null;
+  }
+  return acc;
+}
+
 // Storage Public API backed by Cloud Firestore with local storage fallback
 export const storageService = {
   // Profile & User Accounts
@@ -295,30 +435,75 @@ export const storageService = {
     }
   },
 
+  getActiveDefaultAccountId(providedId?: string): string {
+    return getActiveDefaultAccountId(providedId);
+  },
+
+  getTransactionAccountId(tx: any, activeAccountId?: string): string {
+    return getTransactionAccountId(tx, activeAccountId);
+  },
+
+  isDefaultAdminAccount(id?: string | null, activeAdminId?: string): boolean {
+    return isDefaultAdminAccount(id, activeAdminId);
+  },
+
+  getTransactionBranch(tx: Transaction | any, activeAdminId?: string): string | null {
+    return getTransactionBranch(tx, activeAdminId);
+  },
+
+  // Helper mencocokkan kepemilikan akun transaksi dengan filter akun:
+  // - targetAccountId === 'all': mengembalikan true untuk semua transaksi (Konsolidasi Global)
+  // - targetAccountId adalah Default/Admin: mengembalikan true untuk transaksi Admin dan seluruh data lama/legacy (tanpa accountId)
+  // - targetAccountId adalah Cabang: mengembalikan true HANYA jika transaksi terikat secara spesifik ke cabang tersebut
+  matchesAccount(tx: Transaction | string, targetAccountId: string, activeAdminId?: string): boolean {
+    if (!targetAccountId || targetAccountId === 'all') return true;
+
+    const defaultAccount = getActiveDefaultAccountId(activeAdminId);
+    const isTargetDefault = isDefaultAdminAccount(targetAccountId, defaultAccount);
+
+    const txAccount = typeof tx === 'string'
+      ? (isDefaultAdminAccount(tx, defaultAccount) ? MAIN_ADMIN_ACCOUNT_ID : tx.trim())
+      : getTransactionAccountId(tx, defaultAccount);
+
+    if (isTargetDefault) {
+      return isDefaultAdminAccount(txAccount, defaultAccount);
+    }
+
+    return txAccount === targetAccountId.trim();
+  },
+
   // Transactions CRUD backed completely by Firestore
-  async getTransactions(accountId?: string): Promise<Transaction[]> {
+  async getTransactions(accountId?: string, activeAdminId?: string): Promise<Transaction[]> {
     try {
+      const defaultAccount = getActiveDefaultAccountId(activeAdminId);
       const snap = await getDocs(collection(db, COLLECTIONS.TRANSACTIONS));
       const items: Transaction[] = snap.docs.map(d => {
         const data = d.data();
-        const account = data.userId || data.accountId || data.tenantId || 'owner_1';
+        const resolvedAccount = getTransactionAccountId(data, defaultAccount);
+        const branchId = getTransactionBranch(data, defaultAccount);
+
+        const normalizedDate = normalizeStandardDate(data.date, data.createdAt || data.timestamp || data.tanggal || data.created_at);
+        const normalizedCreatedAt = normalizeStandardIso(data.createdAt, data.date || data.timestamp);
+        const normalizedUpdatedAt = normalizeStandardIso(data.updatedAt || data.createdAt, normalizedCreatedAt);
+
         return {
           id: d.id, // Guarantee Firestore Document ID is always preserved
-          userId: account,
-          accountId: account,
-          tenantId: data.tenantId || account,
+          userId: resolvedAccount,
+          accountId: resolvedAccount,
+          branchId: branchId ? branchId : undefined,
+          tenantId: resolvedAccount,
           type: data.type || 'expense',
           categoryId: data.categoryId || 'cat_exp_1',
           categoryName: data.categoryName || data.category || 'Lainnya',
           amount: typeof data.amount === 'number' ? data.amount : Number(data.amount) || 0,
-          date: data.date || new Date().toISOString().split('T')[0],
+          date: normalizedDate,
           description: data.description || '',
           paymentMethod: data.paymentMethod || 'Cash',
           receiptImages: Array.isArray(data.receiptImages) ? data.receiptImages : [],
           isRecurringInstance: !!data.isRecurringInstance,
           recurringId: data.recurringId,
-          createdAt: data.createdAt || new Date().toISOString(),
-          updatedAt: data.updatedAt || data.createdAt || new Date().toISOString(),
+          createdAt: normalizedCreatedAt,
+          updatedAt: normalizedUpdatedAt,
         };
       });
 
@@ -334,30 +519,33 @@ export const storageService = {
         return sorted;
       }
 
-      // 2. Ketika dipilih akun/cabang spesifik, kueri memfilter transaksi berdasarkan accountId / tenantId yang sesuai.
-      return sorted.filter(t => {
-        const tAccount = t.userId || t.accountId || t.tenantId || 'owner_1';
-        if (accountId === 'owner_1') {
-          return tAccount === 'owner_1';
-        }
-        return tAccount === accountId;
-      });
+      // 2. Ketika dipilih akun/cabang spesifik, kueri memfilter transaksi berdasarkan accountId yang sesuai
+      // dengan fallback otomatis data lama (single-account) ke akun default utama.
+      return sorted.filter(t => this.matchesAccount(t, accountId, defaultAccount));
     } catch (error) {
       const err = handleFirestoreError(error, OperationType.LIST, COLLECTIONS.TRANSACTIONS);
       throw new Error(err.error || 'Gagal memuat daftar transaksi dari Cloud Firestore.');
     }
   },
 
-  async saveTransaction(transaction: Transaction): Promise<Transaction> {
+  async saveTransaction(transaction: Transaction, activeAdminId?: string): Promise<Transaction> {
     if (!transaction.id) {
       throw new Error('ID dokumen transaksi tidak valid.');
     }
 
     try {
       const docRef = doc(db, COLLECTIONS.TRANSACTIONS, transaction.id);
+      const defaultAccount = getActiveDefaultAccountId(activeAdminId);
+      const targetAccount = getTransactionAccountId(transaction, defaultAccount);
+      const isDefaultAccount = isDefaultAdminAccount(targetAccount, defaultAccount);
+      const canonicalAccount = isDefaultAccount ? 'owner_1' : targetAccount;
+
       const dataToSave = cleanFirestoreData({
         id: transaction.id,
-        userId: transaction.userId || 'owner_1',
+        accountId: canonicalAccount,
+        userId: canonicalAccount,
+        tenantId: canonicalAccount,
+        branchId: isDefaultAccount ? deleteField() : canonicalAccount,
         type: transaction.type,
         date: transaction.date,
         category: transaction.categoryName || 'Lainnya',
@@ -377,12 +565,60 @@ export const storageService = {
       await setDoc(docRef, dataToSave, { merge: true });
       return {
         ...transaction,
-        userId: dataToSave.userId,
+        accountId: canonicalAccount,
+        userId: canonicalAccount,
+        tenantId: canonicalAccount,
+        branchId: isDefaultAccount ? undefined : canonicalAccount,
         updatedAt: dataToSave.updatedAt,
       };
     } catch (error) {
       const err = handleFirestoreError(error, OperationType.WRITE, `${COLLECTIONS.TRANSACTIONS}/${transaction.id}`);
       throw new Error(err.error || 'Transaksi gagal disimpan ke database Firestore.');
+    }
+  },
+
+  // Helper khusus Admin untuk memindahkan akun/cabang transaksi secara langsung & permanen ke Firestore
+  async reassignTransactionAccount(transactionId: string, newAccountId: string, activeAdminId?: string): Promise<Transaction> {
+    if (!transactionId) {
+      throw new Error('ID dokumen transaksi tidak valid.');
+    }
+
+    try {
+      const docRef = doc(db, COLLECTIONS.TRANSACTIONS, transactionId);
+      const defaultAccount = getActiveDefaultAccountId(activeAdminId);
+      const isDefault = isDefaultAdminAccount(newAccountId, defaultAccount);
+      const canonicalAccount = isDefault ? 'owner_1' : newAccountId.trim();
+
+      const snap = await getDoc(docRef);
+      if (!snap.exists()) {
+        throw new Error('Dokumen transaksi tidak ditemukan di database Cloud Firestore.');
+      }
+
+      const existingData = snap.data();
+      const updatedAt = new Date().toISOString();
+
+      const patchData = cleanFirestoreData({
+        accountId: canonicalAccount,
+        userId: canonicalAccount,
+        tenantId: canonicalAccount,
+        branchId: isDefault ? deleteField() : canonicalAccount,
+        updatedAt,
+      });
+
+      await setDoc(docRef, patchData, { merge: true });
+
+      return {
+        id: transactionId,
+        ...existingData,
+        accountId: canonicalAccount,
+        userId: canonicalAccount,
+        tenantId: canonicalAccount,
+        branchId: isDefault ? undefined : canonicalAccount,
+        updatedAt,
+      } as Transaction;
+    } catch (error) {
+      const err = handleFirestoreError(error, OperationType.UPDATE, `${COLLECTIONS.TRANSACTIONS}/${transactionId}`);
+      throw new Error(err.error || 'Gagal memindahkan akun transaksi di Cloud Firestore.');
     }
   },
 
@@ -396,6 +632,74 @@ export const storageService = {
     } catch (error) {
       const err = handleFirestoreError(error, OperationType.DELETE, `${COLLECTIONS.TRANSACTIONS}/${id}`);
       throw new Error(err.error || 'Transaksi gagal dihapus dari database Firestore.');
+    }
+  },
+
+  // Batch Reassign: Memindahkan banyak transaksi sekaligus ke akun/cabang target secara atomik menggunakan writeBatch
+  async batchReassignTransactions(transactionIds: string[], newAccountId: string, activeAdminId?: string): Promise<{ success: boolean; count: number }> {
+    if (!Array.isArray(transactionIds) || transactionIds.length === 0) {
+      return { success: true, count: 0 };
+    }
+
+    try {
+      const defaultAccount = getActiveDefaultAccountId(activeAdminId);
+      const isDefault = isDefaultAdminAccount(newAccountId, defaultAccount);
+      const canonicalAccount = isDefault ? 'owner_1' : newAccountId.trim();
+      const updatedAt = new Date().toISOString();
+
+      const patchData = cleanFirestoreData({
+        accountId: canonicalAccount,
+        userId: canonicalAccount,
+        tenantId: canonicalAccount,
+        branchId: isDefault ? deleteField() : canonicalAccount,
+        updatedAt,
+      });
+
+      // Bagi transaksi menjadi batch-batch berukuran maksimal 400 (di bawah batas Firestore 500)
+      const chunkSize = 400;
+      for (let i = 0; i < transactionIds.length; i += chunkSize) {
+        const chunk = transactionIds.slice(i, i + chunkSize);
+        const batch = writeBatch(db);
+        for (const txId of chunk) {
+          if (txId) {
+            const docRef = doc(db, COLLECTIONS.TRANSACTIONS, txId);
+            batch.set(docRef, patchData, { merge: true });
+          }
+        }
+        await batch.commit();
+      }
+
+      return { success: true, count: transactionIds.length };
+    } catch (error) {
+      const err = handleFirestoreError(error, OperationType.WRITE, COLLECTIONS.TRANSACTIONS);
+      throw new Error(err.error || 'Gagal memindahkan transaksi terpilih secara massal.');
+    }
+  },
+
+  // Batch Delete: Menghapus banyak transaksi sekaligus menggunakan writeBatch
+  async batchDeleteTransactions(transactionIds: string[]): Promise<{ success: boolean; count: number }> {
+    if (!Array.isArray(transactionIds) || transactionIds.length === 0) {
+      return { success: true, count: 0 };
+    }
+
+    try {
+      const chunkSize = 400;
+      for (let i = 0; i < transactionIds.length; i += chunkSize) {
+        const chunk = transactionIds.slice(i, i + chunkSize);
+        const batch = writeBatch(db);
+        for (const txId of chunk) {
+          if (txId) {
+            const docRef = doc(db, COLLECTIONS.TRANSACTIONS, txId);
+            batch.delete(docRef);
+          }
+        }
+        await batch.commit();
+      }
+
+      return { success: true, count: transactionIds.length };
+    } catch (error) {
+      const err = handleFirestoreError(error, OperationType.DELETE, COLLECTIONS.TRANSACTIONS);
+      throw new Error(err.error || 'Gagal menghapus transaksi terpilih secara massal.');
     }
   },
 
@@ -633,35 +937,43 @@ export const storageService = {
     }
   },
 
-  // Real-time Subscriptions with onSnapshot for instant cloud sync across devices
   subscribeTransactions(
     callback: (items: Transaction[]) => void, 
     onError?: (err: Error) => void, 
-    accountId?: string
+    accountId?: string,
+    activeAdminId?: string
   ): () => void {
+    const defaultAccount = getActiveDefaultAccountId(activeAdminId);
     return onSnapshot(
       collection(db, COLLECTIONS.TRANSACTIONS),
       (snapshot) => {
         let items: Transaction[] = snapshot.docs.map(d => {
           const data = d.data();
-          const account = data.userId || data.accountId || data.tenantId || 'owner_1';
+          const resolvedAccount = getTransactionAccountId(data, defaultAccount);
+          const branchId = getTransactionBranch(data, defaultAccount);
+
+          const normalizedDate = normalizeStandardDate(data.date, data.createdAt || data.timestamp || data.tanggal || data.created_at);
+          const normalizedCreatedAt = normalizeStandardIso(data.createdAt, data.date || data.timestamp);
+          const normalizedUpdatedAt = normalizeStandardIso(data.updatedAt || data.createdAt, normalizedCreatedAt);
+
           return {
             id: d.id,
-            userId: account,
-            accountId: account,
-            tenantId: data.tenantId || account,
+            userId: resolvedAccount,
+            accountId: resolvedAccount,
+            branchId: branchId ? branchId : undefined,
+            tenantId: resolvedAccount,
             type: data.type || 'expense',
             categoryId: data.categoryId || 'cat_exp_1',
             categoryName: data.categoryName || data.category || 'Lainnya',
             amount: typeof data.amount === 'number' ? data.amount : Number(data.amount) || 0,
-            date: data.date || new Date().toISOString().split('T')[0],
+            date: normalizedDate,
             description: data.description || '',
             paymentMethod: data.paymentMethod || 'Cash',
             receiptImages: Array.isArray(data.receiptImages) ? data.receiptImages : [],
             isRecurringInstance: !!data.isRecurringInstance,
             recurringId: data.recurringId,
-            createdAt: data.createdAt || new Date().toISOString(),
-            updatedAt: data.updatedAt || data.createdAt || new Date().toISOString(),
+            createdAt: normalizedCreatedAt,
+            updatedAt: normalizedUpdatedAt,
           };
         });
         items.sort((a, b) => {
@@ -677,14 +989,9 @@ export const storageService = {
           return;
         }
 
-        // 2. Ketika dipilih akun/cabang spesifik, kueri memfilter transaksi berdasarkan accountId / tenantId yang sesuai.
-        const filtered = items.filter(t => {
-          const tAccount = t.userId || t.accountId || t.tenantId || 'owner_1';
-          if (accountId === 'owner_1') {
-            return tAccount === 'owner_1';
-          }
-          return tAccount === accountId;
-        });
+        // 2. Ketika dipilih akun/cabang spesifik, kueri memfilter transaksi berdasarkan accountId yang sesuai
+        // dengan fallback otomatis data lama (single-account) ke akun default utama.
+        const filtered = items.filter(t => this.matchesAccount(t, accountId, defaultAccount));
         callback(filtered);
       },
       (error) => {

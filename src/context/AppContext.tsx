@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, createContext, useContext, useCallback, useMemo } from 'react';
 import { 
   UserProfile, 
   Transaction, 
@@ -22,6 +22,8 @@ interface AppContextType {
   hasAccount: boolean;
   isAuthenticated: boolean;
   isLoading: boolean;
+  selectedAccountFilter: string;
+  setSelectedAccountFilter: (accountId: string) => void;
   login: (username: string, password: string) => Promise<{ success: boolean; error?: string }>;
   registerOwnerAccount: (username: string, password: string, displayName?: string) => Promise<{ success: boolean; error?: string; alreadyExists?: boolean }>;
   logout: () => void;
@@ -47,6 +49,8 @@ interface AppContextType {
   addTransaction: (data: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Transaction>;
   updateTransaction: (data: Transaction) => Promise<Transaction>;
   deleteTransaction: (id: string) => Promise<void>;
+  batchReassignTransactions: (transactionIds: string[], newAccountId: string) => Promise<void>;
+  batchDeleteTransactions: (transactionIds: string[]) => Promise<void>;
   firestoreError: string | null;
   clearFirestoreError: () => void;
 
@@ -125,6 +129,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [modalDefaultType, setModalDefaultType] = useState<TransactionType>('expense');
+  // Active Account / Vault Filter State:
+  // - Admin: 'owner_1' (Default), 'all' (Konsolidasi), atau ID akun cabang
+  // - Non-admin: Terisolasi mutlak ke ID akunnya sendiri
+  const [selectedAccountFilter, setSelectedAccountFilterState] = useState<string>('owner_1');
+
+  const setSelectedAccountFilter = useCallback((accountId: string) => {
+    if (!profile) return;
+    if (profile.role !== 'admin') {
+      setSelectedAccountFilterState(profile.id);
+      return;
+    }
+    // Jika memilih akun admin / pemilik, standardisasi ke 'owner_1'
+    if (accountId === profile.id || accountId === 'owner_1' || accountId === 'admin') {
+      setSelectedAccountFilterState('owner_1');
+      return;
+    }
+    setSelectedAccountFilterState(accountId);
+  }, [profile]);
+
+  // Sinkronisasi otomatis saat profile dimuat
+  useEffect(() => {
+    if (profile) {
+      if (profile.role !== 'admin') {
+        setSelectedAccountFilterState(profile.id);
+      } else {
+        setSelectedAccountFilterState((prev) => {
+          if (!prev || prev === 'me' || prev === profile.id || prev === 'admin') return 'owner_1';
+          return prev;
+        });
+      }
+    }
+  }, [profile]);
 
   const clearFirestoreError = useCallback(() => {
     setFirestoreError(null);
@@ -715,11 +751,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const cat = categories.find(c => c.id === data.categoryId);
     const catName = cat?.name || data.categoryName || 'Lainnya';
     const newDocId = `tx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const targetAccountId = (profile?.role === 'admin' && (data.accountId || data.userId))
+      ? (data.accountId || data.userId)
+      : (profile?.id || 'owner_1');
+    const defaultAccount = storageService.getActiveDefaultAccountId(profile?.id);
+    const isDefault = storageService.isDefaultAdminAccount(targetAccountId, defaultAccount);
+    const canonicalAccount = isDefault ? 'owner_1' : targetAccountId;
 
     const newTx: Transaction = {
       ...data,
       id: newDocId,
-      userId: profile?.id || 'owner_1',
+      userId: canonicalAccount,
+      accountId: canonicalAccount,
+      tenantId: canonicalAccount,
+      branchId: isDefault ? undefined : canonicalAccount,
       categoryId: data.categoryId,
       categoryName: catName,
       createdAt: now,
@@ -727,19 +772,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     // Save directly to Cloud Firestore document first; throws on failure
-    await storageService.saveTransaction(newTx);
+    const saved = await storageService.saveTransaction(newTx, profile?.id);
 
     // After Firestore confirms success, immediately update React state
     setTransactions((prev) => {
-      const filtered = prev.filter((t) => t.id !== newTx.id);
-      return [newTx, ...filtered].sort((a, b) => {
+      const filtered = prev.filter((t) => t.id !== saved.id);
+      return [saved, ...filtered].sort((a, b) => {
         const cmp = (b.date || '').localeCompare(a.date || '');
         if (cmp !== 0) return cmp;
         return (b.createdAt || '').localeCompare(a.createdAt || '');
       });
     });
 
-    return newTx;
+    return saved;
   };
 
   const updateTransaction = async (data: Transaction): Promise<Transaction> => {
@@ -763,26 +808,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const cat = categories.find(c => c.id === data.categoryId);
     const catName = cat?.name || data.categoryName || 'Lainnya';
+
+    // Dukung pemindahan akun/cabang transaksi oleh Admin
+    const targetAccountId = (profile?.role === 'admin' && (data.accountId || data.userId))
+      ? (data.accountId || data.userId)
+      : (data.accountId || data.userId || profile?.id || 'owner_1');
+    const defaultAccount = storageService.getActiveDefaultAccountId(profile?.id);
+    const isDefault = storageService.isDefaultAdminAccount(targetAccountId, defaultAccount);
+    const canonicalAccount = isDefault ? 'owner_1' : targetAccountId;
+
     const updatedTx: Transaction = {
       ...data,
-      userId: data.userId || profile?.id || 'owner_1',
+      userId: canonicalAccount,
+      accountId: canonicalAccount,
+      tenantId: canonicalAccount,
+      branchId: isDefault ? undefined : canonicalAccount,
       categoryName: catName,
       updatedAt: new Date().toISOString(),
     };
 
     // Save update to Cloud Firestore document; throws on failure
-    await storageService.saveTransaction(updatedTx);
+    const saved = await storageService.saveTransaction(updatedTx, profile?.id);
 
     // After Firestore confirms success, immediately update React state
     setTransactions((prev) =>
-      prev.map((t) => (t.id === data.id ? updatedTx : t)).sort((a, b) => {
+      prev.map((t) => (t.id === data.id ? saved : t)).sort((a, b) => {
         const cmp = (b.date || '').localeCompare(a.date || '');
         if (cmp !== 0) return cmp;
         return (b.createdAt || '').localeCompare(a.createdAt || '');
       })
     );
 
-    return updatedTx;
+    return saved;
   };
 
   const deleteTransaction = async (id: string): Promise<void> => {
@@ -803,6 +860,52 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // After Firestore confirms success, immediately update React state
     setTransactions((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  const batchReassignTransactions = async (
+    transactionIds: string[],
+    newAccountId: string
+  ): Promise<void> => {
+    if (profile?.role !== 'admin') {
+      throw new Error('Hanya Super Admin yang diizinkan memindahkan transaksi secara massal.');
+    }
+    if (!transactionIds.length) return;
+
+    await storageService.batchReassignTransactions(transactionIds, newAccountId, profile.id);
+
+    const defaultAccount = storageService.getActiveDefaultAccountId(profile.id);
+    const isDefault = storageService.isDefaultAdminAccount(newAccountId, defaultAccount);
+    const canonicalAccount = isDefault ? 'owner_1' : newAccountId.trim();
+    const idSet = new Set(transactionIds);
+    const now = new Date().toISOString();
+
+    setTransactions((prev) =>
+      prev.map((t) => {
+        if (idSet.has(t.id)) {
+          return {
+            ...t,
+            accountId: canonicalAccount,
+            userId: canonicalAccount,
+            tenantId: canonicalAccount,
+            branchId: isDefault ? undefined : canonicalAccount,
+            updatedAt: now,
+          };
+        }
+        return t;
+      })
+    );
+  };
+
+  const batchDeleteTransactions = async (transactionIds: string[]): Promise<void> => {
+    if (profile?.role !== 'admin') {
+      throw new Error('Hanya Super Admin yang diizinkan menghapus transaksi secara massal.');
+    }
+    if (!transactionIds.length) return;
+
+    await storageService.batchDeleteTransactions(transactionIds);
+
+    const idSet = new Set(transactionIds);
+    setTransactions((prev) => prev.filter((t) => !idSet.has(t.id)));
   };
 
   // Categories CRUD
@@ -977,31 +1080,61 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     await storageService.deleteDebt(id);
   };
 
-  // Visible debts filtered by role:
-  // - Admin (Tuan Muda): Super Admin dengan akses penuh (melihat seluruh piutang)
+  // Visible debts filtered by role & selectedAccountFilter:
+  // - Admin (Tuan Muda):
+  //   * 'all': melihat seluruh piutang (konsolidasi)
+  //   * 'owner_1' / profile.id: melihat piutang kas pribadi admin
+  //   * branchId: melihat piutang milik cabang tersebut
   // - User (Pengguna Biasa): Hanya mengelola piutang miliknya sendiri
-  const visibleDebts = React.useMemo(() => {
+  const visibleDebts = useMemo(() => {
     if (!profile) return [];
-    const source = profile.role === 'admin'
-      ? debts
-      : debts.filter(d => d.userId === profile.id);
+    if (profile.role !== 'admin') {
+      const source = debts.filter(d => (d.userId || 'owner_1') === profile.id);
+      const map = new Map<string, Debt>();
+      source.forEach(d => {
+        if (d && d.id) map.set(d.id, d);
+      });
+      return Array.from(map.values());
+    }
+    if (selectedAccountFilter === 'all') {
+      const map = new Map<string, Debt>();
+      debts.forEach(d => {
+        if (d && d.id) map.set(d.id, d);
+      });
+      return Array.from(map.values());
+    }
+    const target = selectedAccountFilter || profile.id || 'owner_1';
+    const source = debts.filter(d => {
+      const account = d.userId || 'owner_1';
+      if (target === 'owner_1' || target === profile.id) {
+        return account === 'owner_1' || account === profile.id;
+      }
+      return account === target;
+    });
     const map = new Map<string, Debt>();
     source.forEach(d => {
       if (d && d.id) map.set(d.id, d);
     });
     return Array.from(map.values());
-  }, [debts, profile]);
+  }, [debts, profile, selectedAccountFilter]);
 
-  // Visible transactions filtered by role:
-  // - Admin (Tuan Muda): Super Admin dengan akses penuh (melihat seluruh transaksi)
-  // - User (Pengguna Biasa): Hanya mengelola transaksi miliknya sendiri
-  const visibleTransactions = React.useMemo(() => {
+  // Visible transactions filtered by role & selectedAccountFilter:
+  // - Admin (Tuan Muda):
+  //   * 'all': seluruh transaksi (konsolidasi global)
+  //   * 'owner_1' / profile.id: HANYA kas pribadi admin (bersih dari transaksi cabang)
+  //   * branchId: hanya transaksi milik cabang tersebut
+  // - User (Pengguna Biasa): Terisolasi mutlak ke transaksi miliknya sendiri
+  const visibleTransactions = useMemo(() => {
     if (!profile) return [];
-    if (profile.role === 'admin') {
+    if (profile.role !== 'admin') {
+      return transactions.filter(t => storageService.matchesAccount(t, profile.id, profile.id));
+    }
+    if (selectedAccountFilter === 'all') {
       return transactions;
     }
-    return transactions.filter(t => (t.userId || 'owner_1') === profile.id);
-  }, [transactions, profile]);
+    const target = selectedAccountFilter || 'owner_1';
+    return transactions.filter(t => storageService.matchesAccount(t, target, profile.id));
+  }, [transactions, profile, selectedAccountFilter]);
 
   return (
     <AppContext.Provider
@@ -1011,6 +1144,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         hasAccount: users.length > 0 || profile !== null,
         isAuthenticated,
         isLoading,
+        selectedAccountFilter,
+        setSelectedAccountFilter,
         login,
         registerOwnerAccount,
         logout,
@@ -1029,6 +1164,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addTransaction,
         updateTransaction,
         deleteTransaction,
+        batchReassignTransactions,
+        batchDeleteTransactions,
         firestoreError,
         clearFirestoreError,
         categories,

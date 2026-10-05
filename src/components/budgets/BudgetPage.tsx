@@ -11,7 +11,7 @@ import {
   X,
   Target
 } from 'lucide-react';
-import { formatRupiah, formatIndonesianMonthYear } from '../../lib/formatters';
+import { formatRupiah, formatIndonesianMonthYear, parseFlexibleDate } from '../../lib/formatters';
 import { CategoryIcon } from '../common/CategoryIcon';
 
 export const BudgetPage: React.FC = () => {
@@ -37,13 +37,9 @@ export const BudgetPage: React.FC = () => {
     const map: Record<string, number> = {};
     transactions.forEach((tx) => {
       if (tx.type === 'expense') {
-        const parts = tx.date.split('-');
-        if (parts.length >= 2) {
-          const y = parseInt(parts[0], 10);
-          const m = parseInt(parts[1], 10);
-          if (y === currentYear && m === currentMonth) {
-            map[tx.categoryId] = (map[tx.categoryId] || 0) + tx.amount;
-          }
+        const parsed = parseFlexibleDate(tx.date || tx.createdAt);
+        if (parsed && parsed.year === currentYear && parsed.month === currentMonth) {
+          map[tx.categoryId] = (map[tx.categoryId] || 0) + tx.amount;
         }
       }
     });
