@@ -14,7 +14,8 @@ import {
   Layers,
   ChevronDown,
   Building2,
-  Users
+  Users,
+  Printer
 } from 'lucide-react';
 import { 
   formatRupiah, 
@@ -24,6 +25,7 @@ import {
 } from '../../lib/formatters';
 import { Transaction } from '../../types';
 import { storageService } from '../../lib/storage';
+import { PrintReportModal } from './PrintReportModal';
 
 type ReportPeriod = 'today' | 'this_week' | 'this_month' | 'this_year' | 'custom';
 
@@ -59,6 +61,7 @@ export const ReportsPage: React.FC = () => {
   const [period, setPeriod] = useState<ReportPeriod>('this_month');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
 
   const now = new Date();
   const currentYear = now.getFullYear();
@@ -252,27 +255,40 @@ export const ReportsPage: React.FC = () => {
           </p>
         </div>
 
-        {/* Period Selector Tabs */}
-        <div className="flex flex-wrap items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl">
-          {[
-            { id: 'today', label: 'Hari Ini' },
-            { id: 'this_week', label: 'Minggu Ini' },
-            { id: 'this_month', label: 'Bulan Ini' },
-            { id: 'this_year', label: 'Tahun Ini' },
-            { id: 'custom', label: 'Kustom' },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setPeriod(tab.id as ReportPeriod)}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
-                period === tab.id
-                  ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Period Selector Tabs */}
+          <div className="flex flex-wrap items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl">
+            {[
+              { id: 'today', label: 'Hari Ini' },
+              { id: 'this_week', label: 'Minggu Ini' },
+              { id: 'this_month', label: 'Bulan Ini' },
+              { id: 'this_year', label: 'Tahun Ini' },
+              { id: 'custom', label: 'Kustom' },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setPeriod(tab.id as ReportPeriod)}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
+                  period === tab.id
+                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Tombol Cetak Rekap PDF */}
+          <button
+            type="button"
+            onClick={() => setIsPrintModalOpen(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-xl transition cursor-pointer shadow-xs shadow-emerald-950/20"
+            title="Cetak Rekap Laporan PDF (Format Buku Rekening)"
+          >
+            <Printer className="w-4 h-4 stroke-[2.3]" />
+            <span>Cetak Rekap PDF</span>
+          </button>
         </div>
       </div>
 
@@ -579,6 +595,15 @@ export const ReportsPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Modal Cetak Rekap Laporan PDF (Format Buku Rekening) */}
+      <PrintReportModal
+        isOpen={isPrintModalOpen}
+        onClose={() => setIsPrintModalOpen(false)}
+        defaultPeriod={period === 'this_month' ? 'this_month' : period === 'custom' ? 'custom' : 'month'}
+        defaultStartDate={currentRange.start}
+        defaultEndDate={currentRange.end}
+      />
     </div>
   );
 };

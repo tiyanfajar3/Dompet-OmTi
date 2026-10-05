@@ -19,13 +19,15 @@ import {
   User,
   Building2,
   ArrowLeftRight,
-  Check
+  Check,
+  Printer
 } from 'lucide-react';
 import { Transaction, ReceiptImage, TransactionType } from '../../types';
 import { formatRupiah, formatIndonesianDate, parseFlexibleDate } from '../../lib/formatters';
 import { CategoryIcon } from '../common/CategoryIcon';
 import { ReceiptViewerModal } from '../common/ReceiptViewerModal';
 import { storageService } from '../../lib/storage';
+import { PrintReportModal } from '../reports/PrintReportModal';
 
 export const TransactionListPage: React.FC = () => {
   const { 
@@ -170,6 +172,7 @@ export const TransactionListPage: React.FC = () => {
   const [detailTx, setDetailTx] = useState<Transaction | null>(null);
   const [selectedReceipts, setSelectedReceipts] = useState<ReceiptImage[]>([]);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
 
   // Modal & Logika Pindah Akun / Cabang Transaksi (Khusus Admin)
   const [reassigningTx, setReassigningTx] = useState<Transaction | null>(null);
@@ -556,13 +559,25 @@ export const TransactionListPage: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={() => openAddModal('expense')}
-          className="self-start sm:self-auto px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Tambah Transaksi</span>
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={() => setIsPrintModalOpen(true)}
+            className="px-3.5 py-2 text-xs font-semibold bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
+            title="Cetak Rekap Laporan PDF (Format Buku Rekening)"
+          >
+            <Printer className="w-4 h-4 text-emerald-600 dark:text-emerald-400 stroke-[2.2]" />
+            <span>Cetak Rekap PDF</span>
+          </button>
+
+          <button
+            onClick={() => openAddModal('expense')}
+            className="px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Tambah Transaksi</span>
+          </button>
+        </div>
       </div>
 
       {/* Khusus Akun Admin: Elemen Dropdown Filter Akun / Tenant */}
@@ -1618,6 +1633,15 @@ export const TransactionListPage: React.FC = () => {
           <span>{reassignSuccessToast}</span>
         </div>
       )}
+
+      {/* Modal Cetak Rekap Laporan PDF (Buku Rekening) */}
+      <PrintReportModal
+        isOpen={isPrintModalOpen}
+        onClose={() => setIsPrintModalOpen(false)}
+        defaultPeriod={filterDatePreset === 'custom' ? 'custom' : filterDatePreset === 'all' ? 'all' : 'this_month'}
+        defaultStartDate={customStartDate}
+        defaultEndDate={customEndDate}
+      />
     </div>
   );
 };
