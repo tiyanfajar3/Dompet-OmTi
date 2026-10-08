@@ -7,8 +7,6 @@ import { DashboardPage } from './components/dashboard/DashboardPage';
 import { TransactionListPage } from './components/transactions/TransactionListPage';
 import { DebtsPage } from './components/debts/DebtsPage';
 import { ReportsPage } from './components/reports/ReportsPage';
-import { BudgetPage } from './components/budgets/BudgetPage';
-import { RecurringPage } from './components/recurring/RecurringPage';
 import { ProfileSettingsPage } from './components/profile/ProfileSettingsPage';
 import { TransactionFormModal } from './components/transactions/TransactionFormModal';
 import { OfflineIndicator } from './components/common/OfflineIndicator';
@@ -64,8 +62,6 @@ const MainLayout: React.FC = () => {
         {activeTab === 'transactions' && <TransactionListPage />}
         {activeTab === 'debts' && <DebtsPage />}
         {activeTab === 'reports' && <ReportsPage />}
-        {activeTab === 'budgets' && <BudgetPage />}
-        {activeTab === 'recurring' && <RecurringPage />}
         {activeTab === 'profile' && <ProfileSettingsPage />}
       </main>
 

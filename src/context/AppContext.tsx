@@ -8,11 +8,11 @@ import {
   RecurringTransaction, 
   ActiveTab, 
   ThemeMode, 
-  TransactionType,
-  UserRole,
+  TransactionType, 
+  UserRole, 
   Debt 
 } from '../types';
-import { storageService, initializeDatabase } from '../lib/storage';
+import { storageService, initializeDatabase, getLocalUsers } from '../lib/storage';
 import { verifyPassword, hashPassword, generateSalt } from '../lib/crypto';
 import { getTodayDateString } from '../lib/formatters';
 
@@ -38,11 +38,12 @@ interface AppContextType {
   updateUser: (userId: string, data: Partial<UserProfile> & { newPassword?: string }) => Promise<{ success: boolean; error?: string }>;
   deleteUser: (userId: string) => Promise<{ success: boolean; error?: string }>;
 
-  // Debts (Catatan Piutang)
+  // Debts (Utang, Piutang & Tagihan Wajib)
   debts: Debt[];
   addDebt: (data: Omit<Debt, 'id' | 'createdAt'>) => Promise<Debt>;
   updateDebt: (data: Debt) => Promise<Debt>;
   deleteDebt: (id: string) => Promise<void>;
+  reduceDebtBalance: (debtId: string, amountPaid: number) => Promise<Debt | null>;
 
   // Transactions
   transactions: Transaction[];
@@ -99,11 +100,61 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 const SESSION_KEY = 'dompet_omti_session';
 const THEME_KEY = 'dompet_omti_theme';
 
+// Fast helper to inspect current session from localStorage without blocking render
+function getStoredValidSession(): { userId: string; username: string; role?: string; expiresAt?: number } | null {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const session = JSON.parse(raw);
+    if (session && session.userId && (!session.expiresAt || session.expiresAt > Date.now())) {
+      return session;
+    }
+    localStorage.removeItem(SESSION_KEY);
+  } catch {}
+  return null;
+}
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [users, setUsers] = useState<UserProfile[]>([]);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  // Synchronous initialization for zero-latency mobile rendering
+  const [profile, setProfile] = useState<UserProfile | null>(() => {
+    try {
+      const session = getStoredValidSession();
+      if (!session) return null;
+      const localUsers = getLocalUsers();
+      return localUsers.find(u => u.id === session.userId) || null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [users, setUsers] = useState<UserProfile[]>(() => {
+    try {
+      return getLocalUsers();
+    } catch {
+      return [];
+    }
+  });
+
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    try {
+      return !!getStoredValidSession();
+    } catch {
+      return false;
+    }
+  });
+
+  // If no session exists, isLoading is false IMMEDIATELY: renders LoginPage with 0ms delay!
+  const [isLoading, setIsLoading] = useState<boolean>(() => {
+    try {
+      const session = getStoredValidSession();
+      if (!session) return false;
+      const localUsers = getLocalUsers();
+      return !localUsers.some(u => u.id === session.userId);
+    } catch {
+      return false;
+    }
+  });
+
   const [firestoreError, setFirestoreError] = useState<string | null>(null);
 
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -129,6 +180,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [modalDefaultType, setModalDefaultType] = useState<TransactionType>('expense');
+
   // Active Account / Vault Filter State:
   // - Admin: 'owner_1' (Default), 'all' (Konsolidasi), atau ID akun cabang
   // - Non-admin: Terisolasi mutlak ke ID akunnya sendiri
@@ -202,7 +254,160 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [applyTheme, profile]);
 
-  // Load all data directly from Firestore
+  // Session verification & background user hydration
+  useEffect(() => {
+    let isMounted = true;
+
+    const checkSession = async () => {
+      const session = getStoredValidSession();
+      if (!session) {
+        if (isMounted) {
+          setIsLoading(false);
+          setIsAuthenticated(false);
+        }
+        return;
+      }
+
+      try {
+        const fetchedUser = await storageService.getUserById(session.userId);
+        if (!isMounted) return;
+
+        if (fetchedUser) {
+          setProfile(fetchedUser);
+          setIsAuthenticated(true);
+          const savedTheme = localStorage.getItem(THEME_KEY) as ThemeMode;
+          const activeThemeMode = savedTheme || fetchedUser.theme || 'system';
+          setThemeState(activeThemeMode);
+          applyTheme(activeThemeMode);
+        } else {
+          // If user not found in remote or local storage
+          const localUsers = getLocalUsers();
+          const fallbackUser = localUsers.find(u => u.id === session.userId);
+          if (fallbackUser) {
+            setProfile(fallbackUser);
+            setIsAuthenticated(true);
+          } else {
+            localStorage.removeItem(SESSION_KEY);
+            setIsAuthenticated(false);
+            setProfile(null);
+          }
+        }
+      } catch (err) {
+        console.warn('Session verification fallback note:', err);
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    checkSession();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [applyTheme]);
+
+  // Authenticated Data Realtime Synchronization
+  // Runs ONLY when user is authenticated, avoiding wasteful blocking and unneeded network usage on login page
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+
+    let isMounted = true;
+    let unsubs: Array<() => void> = [];
+
+    // Background seed default database items if needed without blocking UI
+    initializeDatabase().catch((err) => {
+      console.warn('Background database initialization note:', err);
+    });
+
+    // Attach Realtime Subscriptions so data stays automatically synchronized across devices
+    // Note: Firestore onSnapshot immediately delivers the current state on its first snapshot callback,
+    // eliminating the need for an expensive duplicate refreshData() fetch on startup.
+    const unsubTx = storageService.subscribeTransactions(
+      (txs) => {
+        if (isMounted) {
+          setTransactions(txs);
+          setFirestoreError(null);
+        }
+      },
+      (err) => {
+        if (isMounted) {
+          setFirestoreError(err.message);
+        }
+      },
+      'all'
+    );
+
+    const unsubCat = storageService.subscribeCategories((cats) => {
+      if (isMounted) setCategories(cats);
+    });
+
+    const unsubPm = storageService.subscribePaymentMethods((pms) => {
+      if (isMounted) setPaymentMethods(pms);
+    });
+
+    const unsubBg = storageService.subscribeBudgets((bgs) => {
+      if (isMounted) setBudgets(bgs);
+    });
+
+    const unsubRec = storageService.subscribeRecurringTransactions((recs) => {
+      if (isMounted) setRecurringTransactions(recs);
+    });
+
+    const unsubDebts = storageService.subscribeDebts((debtList) => {
+      if (isMounted) {
+        const map = new Map<string, Debt>();
+        debtList.forEach((d) => {
+          if (d && d.id) map.set(d.id, d);
+        });
+        setDebts(Array.from(map.values()));
+      }
+    });
+
+    const unsubUsers = storageService.subscribeUsers((updatedUsers) => {
+      if (isMounted) {
+        setUsers(updatedUsers);
+        setProfile((prev) => {
+          if (!prev) return null;
+          const matched = updatedUsers.find((u) => u.id === prev.id);
+          if (!matched) {
+            localStorage.removeItem(SESSION_KEY);
+            setIsAuthenticated(false);
+            return null;
+          }
+          return matched;
+        });
+      }
+    });
+
+    unsubs = [unsubTx, unsubCat, unsubPm, unsubBg, unsubRec, unsubDebts, unsubUsers];
+
+    return () => {
+      isMounted = false;
+      unsubs.forEach((unsub) => {
+        try {
+          unsub();
+        } catch {}
+      });
+    };
+  }, [isAuthenticated]);
+
+  // Listen to system dark mode preference changes
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = () => {
+      if (theme === 'system') {
+        applyTheme('system');
+      }
+    };
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, [theme, applyTheme]);
+
+  // Manual refresh helper
   const refreshData = useCallback(async (accountId?: string) => {
     try {
       setFirestoreError(null);
@@ -217,25 +422,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ]);
 
       setUsers(allUsers);
-
-      // Check active session if available
-      const storedSession = localStorage.getItem(SESSION_KEY);
-      if (storedSession) {
-        try {
-          const session = JSON.parse(storedSession);
-          if (session && session.userId && session.expiresAt > Date.now()) {
-            const activeUser = allUsers.find(u => u.id === session.userId);
-            if (activeUser) {
-              setProfile(activeUser);
-              const savedTheme = localStorage.getItem(THEME_KEY) as ThemeMode;
-              const activeThemeMode = savedTheme || activeUser.theme || 'system';
-              setThemeState(activeThemeMode);
-              applyTheme(activeThemeMode);
-            }
-          }
-        } catch {}
-      }
-
       setTransactions(txs);
       setCategories(cats);
       setPaymentMethods(pms);
@@ -247,162 +433,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       console.error('Error refreshing data from Firestore:', err);
       setFirestoreError(msg);
     }
-  }, [applyTheme]);
+  }, []);
 
-  // Initial Load, Auth Session Check & Firestore Realtime Sync
-  useEffect(() => {
-    let isMounted = true;
-    let unsubs: Array<() => void> = [];
-
-    const init = async () => {
-      setIsLoading(true);
-      try {
-        await initializeDatabase();
-        if (!isMounted) return;
-
-        // Fetch users first
-        const allUsers = await storageService.getAllUsers();
-        if (isMounted) {
-          setUsers(allUsers);
-        }
-
-        // Check active session in localStorage
-        const storedSession = localStorage.getItem(SESSION_KEY);
-        let currentUser: UserProfile | null = null;
-        if (storedSession) {
-          try {
-            const session = JSON.parse(storedSession);
-            if (session && session.userId && session.expiresAt > Date.now()) {
-              currentUser = allUsers.find(u => u.id === session.userId) || await storageService.getUserById(session.userId);
-              if (currentUser && isMounted) {
-                setProfile(currentUser);
-                setIsAuthenticated(true);
-                const savedTheme = localStorage.getItem(THEME_KEY) as ThemeMode;
-                const activeThemeMode = savedTheme || currentUser.theme || 'system';
-                setThemeState(activeThemeMode);
-                applyTheme(activeThemeMode);
-              } else {
-                localStorage.removeItem(SESSION_KEY);
-                if (isMounted) {
-                  setIsAuthenticated(false);
-                  setProfile(null);
-                }
-              }
-            } else {
-              localStorage.removeItem(SESSION_KEY);
-              if (isMounted) {
-                setIsAuthenticated(false);
-                setProfile(null);
-              }
-            }
-          } catch {
-            localStorage.removeItem(SESSION_KEY);
-            if (isMounted) {
-              setIsAuthenticated(false);
-              setProfile(null);
-            }
-          }
-        }
-
-        await refreshData();
-
-        // Attach Realtime Subscriptions so data stays automatically synchronized across devices
-        const unsubTx = storageService.subscribeTransactions(
-          (txs) => {
-            if (isMounted) {
-              setTransactions(txs);
-              setFirestoreError(null);
-            }
-          },
-          (err) => {
-            if (isMounted) {
-              setFirestoreError(err.message);
-            }
-          },
-          'all'
-        );
-
-        const unsubCat = storageService.subscribeCategories((cats) => {
-          if (isMounted) setCategories(cats);
-        });
-        const unsubPm = storageService.subscribePaymentMethods((pms) => {
-          if (isMounted) setPaymentMethods(pms);
-        });
-        const unsubBg = storageService.subscribeBudgets((bgs) => {
-          if (isMounted) setBudgets(bgs);
-        });
-        const unsubRec = storageService.subscribeRecurringTransactions((recs) => {
-          if (isMounted) setRecurringTransactions(recs);
-        });
-
-        const unsubDebts = storageService.subscribeDebts((debtList) => {
-          if (isMounted) {
-            const map = new Map<string, Debt>();
-            debtList.forEach((d) => {
-              if (d && d.id) map.set(d.id, d);
-            });
-            setDebts(Array.from(map.values()));
-          }
-        });
-
-        // Realtime sync for users & active profile
-        const unsubUsers = storageService.subscribeUsers((updatedUsers) => {
-          if (isMounted) {
-            setUsers(updatedUsers);
-            setProfile((prev) => {
-              if (!prev) return null;
-              const matched = updatedUsers.find(u => u.id === prev.id);
-              if (!matched) {
-                // If the user's account was deleted
-                localStorage.removeItem(SESSION_KEY);
-                setIsAuthenticated(false);
-                return null;
-              }
-              return matched;
-            });
-          }
-        });
-
-        unsubs = [unsubTx, unsubCat, unsubPm, unsubBg, unsubRec, unsubDebts, unsubUsers];
-      } catch (e: unknown) {
-        console.error('Failed to initialize Dompet Omti Firestore database:', e);
-        if (isMounted) {
-          const msg = e instanceof Error ? e.message : 'Gagal menginisialisasi koneksi Cloud Firestore.';
-          setFirestoreError(msg);
-        }
-      } finally {
-        if (isMounted) {
-          setIsLoading(false);
-        }
-      }
-    };
-
-    init();
-
-    return () => {
-      isMounted = false;
-      unsubs.forEach(unsub => {
-        try {
-          unsub();
-        } catch {}
-      });
-    };
-  }, []); // Run once on mount to prevent duplicate listeners
-
-  // Listen to system dark mode preference changes
-  useEffect(() => {
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    const handleChange = () => {
-      if (theme === 'system') {
-        applyTheme('system');
-      }
-    };
-    mediaQuery.addEventListener('change', handleChange);
-    return () => mediaQuery.removeEventListener('change', handleChange);
-  }, [theme, applyTheme]);
-
-  // Login handler supporting multi-user
-  const login = async (username: string, pass: string): Promise<{ success: boolean; error?: string }> => {
+  // Login handler
+  const login = useCallback(async (username: string, pass: string): Promise<{ success: boolean; error?: string }> => {
     const cleanUser = username.trim().toLowerCase();
     const allUsers = await storageService.getAllUsers();
 
@@ -437,10 +471,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     applyTheme(activeThemeMode);
 
     return { success: true };
-  };
+  }, [applyTheme]);
 
-  // Register / Initial Setup owner account
-  const registerOwnerAccount = async (
+  // Register owner account
+  const registerOwnerAccount = useCallback(async (
     username: string,
     pass: string,
     displayName = 'Tuan Muda'
@@ -453,7 +487,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     try {
-      // 1. Periksa apakah akun pemilik sudah terdaftar sebelumnya di Firestore atau localStorage
       const existingOwner = await storageService.getProfile('owner_1');
       if (existingOwner) {
         console.warn('Akun pemilik sudah terdaftar di Firestore/localStorage:', existingOwner.username);
@@ -465,7 +498,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         };
       }
 
-      // 2. Buat akun pemilik baru (didukung fallback localStorage jika Firestore gagal)
       const newProfile = await storageService.createOwnerProfile(username, pass, displayName);
       const session = {
         userId: newProfile.id,
@@ -477,7 +509,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setProfile(newProfile);
       setUsers([newProfile]);
       setIsAuthenticated(true);
-      await refreshData();
       return { success: true };
     } catch (err: unknown) {
       console.error('Detail error registerOwnerAccount:', err);
@@ -487,18 +518,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         error: `Gagal membuat akun pemilik: ${detailMsg}` 
       };
     }
-  };
+  }, []);
 
   // Logout handler
-  const logout = () => {
+  const logout = useCallback(() => {
     localStorage.removeItem(SESSION_KEY);
     setIsAuthenticated(false);
     setProfile(null);
+    setTransactions([]);
+    setDebts([]);
+    setBudgets([]);
+    setRecurringTransactions([]);
     setActiveTab('dashboard');
-  };
+  }, []);
 
-  // CRUD Data Akun Pengguna (Tahap 2)
-  const addUser = async (userData: {
+  // User Accounts Management
+  const addUser = useCallback(async (userData: {
     username: string;
     password: string;
     displayName: string;
@@ -552,9 +587,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch {
       return { success: false, error: 'Terjadi kegagalan saat menyimpan akun pengguna ke Cloud Firestore.' };
     }
-  };
+  }, [profile?.role]);
 
-  const updateUser = async (
+  const updateUser = useCallback(async (
     userId: string,
     data: Partial<UserProfile> & { newPassword?: string }
   ): Promise<{ success: boolean; error?: string }> => {
@@ -567,7 +602,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { success: false, error: 'Akun tidak ditemukan.' };
     }
 
-    // Uniqueness check if username changed
     if (data.username && data.username.trim().toLowerCase() !== targetUser.username.toLowerCase()) {
       const cleanUser = data.username.trim().toLowerCase();
       if (!/^[a-zA-Z0-9_.-]+$/.test(cleanUser)) {
@@ -579,7 +613,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       data.username = cleanUser;
     }
 
-    // Role check: prevent removing the last admin
     if (data.role && data.role !== 'admin' && targetUser.role === 'admin') {
       const adminCount = users.filter(u => u.role === 'admin').length;
       if (adminCount <= 1) {
@@ -618,9 +651,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch {
       return { success: false, error: 'Gagal memperbarui data akun pengguna.' };
     }
-  };
+  }, [profile, users]);
 
-  const deleteUser = async (userId: string): Promise<{ success: boolean; error?: string }> => {
+  const deleteUser = useCallback(async (userId: string): Promise<{ success: boolean; error?: string }> => {
     if (profile?.role !== 'admin') {
       return { success: false, error: 'Hanya Super Admin yang diizinkan menghapus akun pengguna.' };
     }
@@ -648,20 +681,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch {
       return { success: false, error: 'Gagal menghapus akun pengguna dari Cloud Firestore.' };
     }
-  };
+  }, [profile?.id, profile?.role, users]);
 
-  // Update Profile
-  const updateProfile = async (data: Partial<UserProfile>): Promise<boolean> => {
+  const updateProfile = useCallback(async (data: Partial<UserProfile>): Promise<boolean> => {
     if (!profile) return false;
     const updated: UserProfile = { ...profile, ...data };
     await storageService.saveProfile(updated);
     setProfile(updated);
     setUsers(prev => prev.map(u => (u.id === updated.id ? updated : u)));
     return true;
-  };
+  }, [profile]);
 
-  // Change Password
-  const changePassword = async (
+  const changePassword = useCallback(async (
     currentPassword: string,
     newPassword: string
   ): Promise<{ success: boolean; error?: string }> => {
@@ -686,16 +717,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setProfile(updated);
     setUsers(prev => prev.map(u => (u.id === updated.id ? updated : u)));
     return { success: true };
-  };
+  }, [profile]);
 
-  // Verify current password for dangerous operations
-  const verifyCurrentPassword = async (password: string): Promise<boolean> => {
+  const verifyCurrentPassword = useCallback(async (password: string): Promise<boolean> => {
     if (!profile) return false;
     return verifyPassword(password, profile.passwordHash, profile.salt);
-  };
+  }, [profile]);
 
-  // Factory Reset
-  const executeFactoryReset = async (password: string): Promise<{ success: boolean; error?: string }> => {
+  const executeFactoryReset = useCallback(async (password: string): Promise<{ success: boolean; error?: string }> => {
     if (!profile) {
       return { success: false, error: 'Tidak ada profil pemilik yang terdaftar.' };
     }
@@ -719,7 +748,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setRecurringTransactions([]);
       setActiveTab('dashboard');
 
-      // Re-fetch default categories and methods
       const [cats, pms] = await Promise.all([
         storageService.getCategories(),
         storageService.getPaymentMethods(),
@@ -731,10 +759,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch {
       return { success: false, error: 'Terjadi kegagalan saat menjalankan Factory Reset.' };
     }
-  };
+  }, [profile]);
 
-  // Transactions CRUD backed by Cloud Firestore
-  const addTransaction = async (
+  // Transactions CRUD
+  const addTransaction = useCallback(async (
     data: Omit<Transaction, 'id' | 'createdAt' | 'updatedAt'>
   ): Promise<Transaction> => {
     if (data.amount <= 0) {
@@ -771,10 +799,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updatedAt: now,
     };
 
-    // Save directly to Cloud Firestore document first; throws on failure
     const saved = await storageService.saveTransaction(newTx, profile?.id);
 
-    // After Firestore confirms success, immediately update React state
     setTransactions((prev) => {
       const filtered = prev.filter((t) => t.id !== saved.id);
       return [saved, ...filtered].sort((a, b) => {
@@ -785,9 +811,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     return saved;
-  };
+  }, [categories, profile?.id, profile?.role]);
 
-  const updateTransaction = async (data: Transaction): Promise<Transaction> => {
+  const updateTransaction = useCallback(async (data: Transaction): Promise<Transaction> => {
     if (!data.id) {
       throw new Error('ID dokumen transaksi tidak ditemukan untuk diubah.');
     }
@@ -798,7 +824,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       throw new Error('Tanggal transaksi wajib diisi.');
     }
 
-    // Role check: Pengguna biasa hanya boleh mengedit transaksi miliknya sendiri
     if (profile?.role === 'user') {
       const existing = transactions.find(t => t.id === data.id);
       if (existing && (existing.userId || 'owner_1') !== profile.id) {
@@ -809,7 +834,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const cat = categories.find(c => c.id === data.categoryId);
     const catName = cat?.name || data.categoryName || 'Lainnya';
 
-    // Dukung pemindahan akun/cabang transaksi oleh Admin
     const targetAccountId = (profile?.role === 'admin' && (data.accountId || data.userId))
       ? (data.accountId || data.userId)
       : (data.accountId || data.userId || profile?.id || 'owner_1');
@@ -827,10 +851,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updatedAt: new Date().toISOString(),
     };
 
-    // Save update to Cloud Firestore document; throws on failure
     const saved = await storageService.saveTransaction(updatedTx, profile?.id);
 
-    // After Firestore confirms success, immediately update React state
     setTransactions((prev) =>
       prev.map((t) => (t.id === data.id ? saved : t)).sort((a, b) => {
         const cmp = (b.date || '').localeCompare(a.date || '');
@@ -840,14 +862,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
 
     return saved;
-  };
+  }, [categories, profile?.id, profile?.role, transactions]);
 
-  const deleteTransaction = async (id: string): Promise<void> => {
+  const deleteTransaction = useCallback(async (id: string): Promise<void> => {
     if (!id) {
       throw new Error('ID transaksi tidak valid untuk dihapus.');
     }
 
-    // Role check: Pengguna biasa hanya boleh menghapus transaksi miliknya sendiri
     if (profile?.role === 'user') {
       const existing = transactions.find(t => t.id === id);
       if (existing && (existing.userId || 'owner_1') !== profile.id) {
@@ -855,14 +876,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    // Delete directly from Cloud Firestore document; throws on failure
     await storageService.deleteTransaction(id);
-
-    // After Firestore confirms success, immediately update React state
     setTransactions((prev) => prev.filter((t) => t.id !== id));
-  };
+  }, [profile?.id, profile?.role, transactions]);
 
-  const batchReassignTransactions = async (
+  const batchReassignTransactions = useCallback(async (
     transactionIds: string[],
     newAccountId: string
   ): Promise<void> => {
@@ -894,9 +912,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return t;
       })
     );
-  };
+  }, [profile?.id, profile?.role]);
 
-  const batchDeleteTransactions = async (transactionIds: string[]): Promise<void> => {
+  const batchDeleteTransactions = useCallback(async (transactionIds: string[]): Promise<void> => {
     if (profile?.role !== 'admin') {
       throw new Error('Hanya Super Admin yang diizinkan menghapus transaksi secara massal.');
     }
@@ -906,27 +924,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const idSet = new Set(transactionIds);
     setTransactions((prev) => prev.filter((t) => !idSet.has(t.id)));
-  };
+  }, [profile?.role]);
 
   // Categories CRUD
-  const addCategory = async (data: Omit<Category, 'id' | 'createdAt'>): Promise<Category> => {
+  const addCategory = useCallback(async (data: Omit<Category, 'id' | 'createdAt'>): Promise<Category> => {
     const newCat: Category = {
       ...data,
       id: `cat_${Date.now()}`,
       createdAt: new Date().toISOString(),
     };
     await storageService.saveCategory(newCat);
-    await refreshData();
+    setCategories(prev => [...prev.filter(c => c.id !== newCat.id), newCat]);
     return newCat;
-  };
+  }, []);
 
-  const updateCategory = async (data: Category): Promise<Category> => {
+  const updateCategory = useCallback(async (data: Category): Promise<Category> => {
     await storageService.saveCategory(data);
-    await refreshData();
+    setCategories(prev => prev.map(c => (c.id === data.id ? data : c)));
     return data;
-  };
+  }, []);
 
-  const deleteCategory = async (id: string): Promise<{ success: boolean; error?: string }> => {
+  const deleteCategory = useCallback(async (id: string): Promise<{ success: boolean; error?: string }> => {
     const count = transactions.filter(t => t.categoryId === id).length;
     if (count > 0) {
       const fallbackCat = categories.find(c => c.name === 'Lainnya' && c.id !== id);
@@ -946,13 +964,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const relatedBudget = budgets.find(b => b.categoryId === id);
     if (relatedBudget) {
       await storageService.deleteBudget(relatedBudget.id);
+      setBudgets(prev => prev.filter(b => b.id !== relatedBudget.id));
     }
-    await refreshData();
+    setCategories(prev => prev.filter(c => c.id !== id));
     return { success: true };
-  };
+  }, [transactions, categories, budgets]);
 
   // Payment Methods CRUD
-  const addPaymentMethod = async (name: string, icon = 'CreditCard'): Promise<PaymentMethod> => {
+  const addPaymentMethod = useCallback(async (name: string, icon = 'CreditCard'): Promise<PaymentMethod> => {
     const newPm: PaymentMethod = {
       id: `pm_${Date.now()}`,
       name: name.trim(),
@@ -961,17 +980,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString(),
     };
     await storageService.savePaymentMethod(newPm);
-    await refreshData();
+    setPaymentMethods(prev => [...prev.filter(p => p.id !== newPm.id), newPm]);
     return newPm;
-  };
+  }, []);
 
-  const deletePaymentMethod = async (id: string): Promise<void> => {
+  const deletePaymentMethod = useCallback(async (id: string): Promise<void> => {
     await storageService.deletePaymentMethod(id);
-    await refreshData();
-  };
+    setPaymentMethods(prev => prev.filter(p => p.id !== id));
+  }, []);
 
   // Budgets CRUD
-  const saveBudget = async (categoryId: string, amount: number): Promise<Budget> => {
+  const saveBudget = useCallback(async (categoryId: string, amount: number): Promise<Budget> => {
     const existing = budgets.find(b => b.categoryId === categoryId);
     const budgetObj: Budget = {
       id: existing ? existing.id : `b_${Date.now()}`,
@@ -980,17 +999,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       period: 'monthly',
     };
     await storageService.saveBudget(budgetObj);
-    await refreshData();
+    setBudgets(prev => [...prev.filter(b => b.id !== budgetObj.id), budgetObj]);
     return budgetObj;
-  };
+  }, [budgets]);
 
-  const deleteBudget = async (id: string): Promise<void> => {
+  const deleteBudget = useCallback(async (id: string): Promise<void> => {
     await storageService.deleteBudget(id);
-    await refreshData();
-  };
+    setBudgets(prev => prev.filter(b => b.id !== id));
+  }, []);
 
   // Recurring Transactions CRUD
-  const addRecurringTransaction = async (
+  const addRecurringTransaction = useCallback(async (
     data: Omit<RecurringTransaction, 'id' | 'createdAt'>
   ): Promise<RecurringTransaction> => {
     const newRec: RecurringTransaction = {
@@ -999,24 +1018,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString(),
     };
     await storageService.saveRecurringTransaction(newRec);
-    await refreshData();
+    setRecurringTransactions(prev => [...prev.filter(r => r.id !== newRec.id), newRec]);
     return newRec;
-  };
+  }, []);
 
-  const updateRecurringTransaction = async (
+  const updateRecurringTransaction = useCallback(async (
     data: RecurringTransaction
   ): Promise<RecurringTransaction> => {
     await storageService.saveRecurringTransaction(data);
-    await refreshData();
+    setRecurringTransactions(prev => prev.map(r => (r.id === data.id ? data : r)));
     return data;
-  };
+  }, []);
 
-  const deleteRecurringTransaction = async (id: string): Promise<void> => {
+  const deleteRecurringTransaction = useCallback(async (id: string): Promise<void> => {
     await storageService.deleteRecurringTransaction(id);
-    await refreshData();
-  };
+    setRecurringTransactions(prev => prev.filter(r => r.id !== id));
+  }, []);
 
-  const executeRecurringNow = async (id: string): Promise<Transaction | null> => {
+  const executeRecurringNow = useCallback(async (id: string): Promise<Transaction | null> => {
     const rec = recurringTransactions.find(r => r.id === id);
     if (!rec) return null;
 
@@ -1044,48 +1063,64 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...rec,
       lastExecutedDate: today,
     });
-    await refreshData();
+    setTransactions(prev => [newTx, ...prev.filter(t => t.id !== newTx.id)]);
     return newTx;
-  };
+  }, [recurringTransactions, categories]);
 
   // Modal helpers
-  const openAddModal = (type: TransactionType = 'expense', txToEdit: Transaction | null = null) => {
+  const openAddModal = useCallback((type: TransactionType = 'expense', txToEdit: Transaction | null = null) => {
     setModalDefaultType(type);
     setEditingTransaction(txToEdit);
     setIsAddModalOpen(true);
-  };
+  }, []);
 
-  const closeAddModal = () => {
+  const closeAddModal = useCallback(() => {
     setIsAddModalOpen(false);
     setEditingTransaction(null);
-  };
+  }, []);
 
   // Debts CRUD
-  const addDebt = async (debtData: Omit<Debt, 'id' | 'createdAt'>): Promise<Debt> => {
+  const addDebt = useCallback(async (debtData: Omit<Debt, 'id' | 'createdAt'>): Promise<Debt> => {
     const newDebt = await storageService.addDebt({
       ...debtData,
       userId: debtData.userId || profile?.id || 'owner_1',
     });
-    // Tidak menambahkan state manual secara lokal di sini untuk mencegah double render/duplikasi,
-    // karena listener realtime Firestore (subscribeDebts) akan mengupdate state secara otomatis.
     return newDebt;
-  };
+  }, [profile?.id]);
 
-  const updateDebt = async (debt: Debt): Promise<Debt> => {
+  const updateDebt = useCallback(async (debt: Debt): Promise<Debt> => {
     const updated = await storageService.updateDebt(debt);
     return updated;
-  };
+  }, []);
 
-  const deleteDebt = async (id: string): Promise<void> => {
+  const deleteDebt = useCallback(async (id: string): Promise<void> => {
     await storageService.deleteDebt(id);
-  };
+    setDebts(prev => prev.filter(d => d.id !== id));
+  }, []);
 
-  // Visible debts filtered by role & selectedAccountFilter:
-  // - Admin (Tuan Muda):
-  //   * 'all': melihat seluruh piutang (konsolidasi)
-  //   * 'owner_1' / profile.id: melihat piutang kas pribadi admin
-  //   * branchId: melihat piutang milik cabang tersebut
-  // - User (Pengguna Biasa): Hanya mengelola piutang miliknya sendiri
+  const reduceDebtBalance = useCallback(async (debtId: string, amountPaid: number): Promise<Debt | null> => {
+    const targetDebt = debts.find(d => d.id === debtId);
+    if (!targetDebt) return null;
+
+    const currentRemaining = typeof targetDebt.remainingAmount === 'number'
+      ? targetDebt.remainingAmount
+      : targetDebt.amount;
+    const newRemaining = Math.max(0, currentRemaining - amountPaid);
+    const newStatus: DebtStatus = newRemaining <= 0 ? 'paid' : 'unpaid';
+
+    const updatedDebt: Debt = {
+      ...targetDebt,
+      remainingAmount: newRemaining,
+      status: newStatus,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const saved = await storageService.updateDebt(updatedDebt);
+    setDebts(prev => prev.map(d => d.id === debtId ? saved : d));
+    return saved;
+  }, [debts]);
+
+  // Visible debts memoized
   const visibleDebts = useMemo(() => {
     if (!profile) return [];
     if (profile.role !== 'admin') {
@@ -1118,12 +1153,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return Array.from(map.values());
   }, [debts, profile, selectedAccountFilter]);
 
-  // Visible transactions filtered by role & selectedAccountFilter:
-  // - Admin (Tuan Muda):
-  //   * 'all': seluruh transaksi (konsolidasi global)
-  //   * 'owner_1' / profile.id: HANYA kas pribadi admin (bersih dari transaksi cabang)
-  //   * branchId: hanya transaksi milik cabang tersebut
-  // - User (Pengguna Biasa): Terisolasi mutlak ke transaksi miliknya sendiri
+  // Visible transactions memoized
   const visibleTransactions = useMemo(() => {
     if (!profile) return [];
     if (profile.role !== 'admin') {
@@ -1136,65 +1166,122 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return transactions.filter(t => storageService.matchesAccount(t, target, profile.id));
   }, [transactions, profile, selectedAccountFilter]);
 
+  // Context value object memoized to protect all consumers from unnecessary re-renders
+  const contextValue = useMemo<AppContextType>(() => ({
+    profile,
+    users,
+    hasAccount: users.length > 0 || profile !== null,
+    isAuthenticated,
+    isLoading,
+    selectedAccountFilter,
+    setSelectedAccountFilter,
+    login,
+    registerOwnerAccount,
+    logout,
+    addUser,
+    updateUser,
+    deleteUser,
+    updateProfile,
+    changePassword,
+    verifyCurrentPassword,
+    executeFactoryReset,
+    debts: visibleDebts,
+    addDebt,
+    updateDebt,
+    deleteDebt,
+    reduceDebtBalance,
+    transactions: visibleTransactions,
+    addTransaction,
+    updateTransaction,
+    deleteTransaction,
+    batchReassignTransactions,
+    batchDeleteTransactions,
+    firestoreError,
+    clearFirestoreError,
+    categories,
+    addCategory,
+    updateCategory,
+    deleteCategory,
+    paymentMethods,
+    addPaymentMethod,
+    deletePaymentMethod,
+    budgets,
+    saveBudget,
+    deleteBudget,
+    recurringTransactions,
+    addRecurringTransaction,
+    updateRecurringTransaction,
+    deleteRecurringTransaction,
+    executeRecurringNow,
+    theme,
+    setTheme,
+    activeTab,
+    setActiveTab,
+    isAddModalOpen,
+    editingTransaction,
+    modalDefaultType,
+    openAddModal,
+    closeAddModal,
+    refreshData,
+  }), [
+    profile,
+    users,
+    isAuthenticated,
+    isLoading,
+    selectedAccountFilter,
+    setSelectedAccountFilter,
+    login,
+    registerOwnerAccount,
+    logout,
+    addUser,
+    updateUser,
+    deleteUser,
+    updateProfile,
+    changePassword,
+    verifyCurrentPassword,
+    executeFactoryReset,
+    visibleDebts,
+    addDebt,
+    updateDebt,
+    deleteDebt,
+    reduceDebtBalance,
+    visibleTransactions,
+    addTransaction,
+    updateTransaction,
+    deleteTransaction,
+    batchReassignTransactions,
+    batchDeleteTransactions,
+    firestoreError,
+    clearFirestoreError,
+    categories,
+    addCategory,
+    updateCategory,
+    deleteCategory,
+    paymentMethods,
+    addPaymentMethod,
+    deletePaymentMethod,
+    budgets,
+    saveBudget,
+    deleteBudget,
+    recurringTransactions,
+    addRecurringTransaction,
+    updateRecurringTransaction,
+    deleteRecurringTransaction,
+    executeRecurringNow,
+    theme,
+    setTheme,
+    activeTab,
+    setActiveTab,
+    isAddModalOpen,
+    editingTransaction,
+    modalDefaultType,
+    openAddModal,
+    closeAddModal,
+    refreshData,
+  ]);
+
   return (
-    <AppContext.Provider
-      value={{
-        profile,
-        users,
-        hasAccount: users.length > 0 || profile !== null,
-        isAuthenticated,
-        isLoading,
-        selectedAccountFilter,
-        setSelectedAccountFilter,
-        login,
-        registerOwnerAccount,
-        logout,
-        addUser,
-        updateUser,
-        deleteUser,
-        updateProfile,
-        changePassword,
-        verifyCurrentPassword,
-        executeFactoryReset,
-        debts: visibleDebts,
-        addDebt,
-        updateDebt,
-        deleteDebt,
-        transactions: visibleTransactions,
-        addTransaction,
-        updateTransaction,
-        deleteTransaction,
-        batchReassignTransactions,
-        batchDeleteTransactions,
-        firestoreError,
-        clearFirestoreError,
-        categories,
-        addCategory,
-        updateCategory,
-        deleteCategory,
-        paymentMethods,
-        addPaymentMethod,
-        deletePaymentMethod,
-        budgets,
-        saveBudget,
-        deleteBudget,
-        recurringTransactions,
-        addRecurringTransaction,
-        updateRecurringTransaction,
-        deleteRecurringTransaction,
-        executeRecurringNow,
-        theme,
-        setTheme,
-        activeTab,
-        setActiveTab,
-        isAddModalOpen,
-        editingTransaction,
-        modalDefaultType,
-        openAddModal,
-        closeAddModal,
-        refreshData,
-      }}
-    >
+    <AppContext.Provider value={contextValue}>
       {children}
     </AppContext.Provider>
   );

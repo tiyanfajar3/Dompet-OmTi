@@ -25,6 +25,9 @@ export interface Transaction {
   receiptImages: ReceiptImage[];
   isRecurringInstance?: boolean;
   recurringId?: string;
+  linkedDebtId?: string;
+  linkedDebtType?: DebtType;
+  linkedDebtName?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -110,17 +113,23 @@ export interface BackupData {
 }
 
 export type DebtStatus = 'unpaid' | 'paid';
+export type DebtType = 'piutang' | 'utang' | 'tagihan';
 
 export interface Debt {
   id: string;
   userId: string;
-  borrowerName: string;
-  amount: number;
+  type?: DebtType; // 'piutang' (uang dipinjam orang), 'utang' (kita pinjam dari orang), 'tagihan' (kewajiban rutin/nafkah/dll). Default: 'piutang'
+  title?: string; // Judul/keperluan utang atau nama tagihan wajib (contoh: "Utang Modal ke Ayah", "Biaya Nafkah Keluarga")
+  borrowerName: string; // Pihak terkait (peminjam untuk piutang, pemberi pinjaman untuk utang, pihak/tujuan tagihan)
+  amount: number; // Total nominal utang / piutang / tagihan
+  remainingAmount?: number; // Sisa saldo yang belum dibayar / lunas
+  monthlyInstallment?: number; // Target cicilan bulanan (contoh: Rp 1.500.000 / bln)
   dueDate: string; // YYYY-MM-DD
   notes?: string;
   status: DebtStatus;
   proofUrl?: string; // string opsional untuk foto bukti
   createdAt: string;
+  updatedAt?: string;
 }
 
-export type ActiveTab = 'dashboard' | 'transactions' | 'debts' | 'reports' | 'budgets' | 'recurring' | 'profile';
+export type ActiveTab = 'dashboard' | 'transactions' | 'debts' | 'reports' | 'profile';

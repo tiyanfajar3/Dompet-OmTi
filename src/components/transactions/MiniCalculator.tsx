@@ -79,7 +79,7 @@ export function evaluateArithmetic(expr: string): number {
   return Math.max(0, Math.round(result * 100) / 100);
 }
 
-export const MiniCalculator: React.FC<MiniCalculatorProps> = ({
+const MiniCalculatorComponent: React.FC<MiniCalculatorProps> = ({
   onApplyValue,
   initialValue = 0,
   onClose,
@@ -451,3 +451,5 @@ export const MiniCalculator: React.FC<MiniCalculatorProps> = ({
     </div>
   );
 };
+
+export const MiniCalculator = React.memo(MiniCalculatorComponent);

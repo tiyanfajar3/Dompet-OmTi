@@ -38,7 +38,6 @@ export const DashboardPage: React.FC = () => {
     users,
     transactions, 
     categories, 
-    budgets, 
     debts,
     openAddModal, 
     setActiveTab,
@@ -59,6 +58,10 @@ export const DashboardPage: React.FC = () => {
   const branchUsers = useMemo(() => {
     return users.filter((u) => u.id !== adminId && u.id !== 'owner_1');
   }, [users, adminId]);
+
+  const categoryMap = useMemo(() => {
+    return new Map(categories.map((c) => [c.id, c]));
+  }, [categories]);
 
   // Label nama akun aktif untuk keterangan ringkasan
   const activeAccountName = useMemo(() => {
@@ -159,17 +162,6 @@ export const DashboardPage: React.FC = () => {
     const frequencyList = [...categoryList].sort((a, b) => b.count - a.count);
     const topFrequentCategory = frequencyList[0] || null;
 
-    // Budget this month
-    let totalBudget = 0;
-    let budgetedExpense = 0;
-    budgets.forEach((b) => {
-      totalBudget += b.amount;
-      const catSpend = expenseCategoryMap[categories.find((c) => c.id === b.categoryId)?.name || '']?.amount || 0;
-      budgetedExpense += catSpend;
-    });
-
-    const budgetPercent = totalBudget > 0 ? Math.min(Math.round((budgetedExpense / totalBudget) * 100), 100) : 0;
-
     return {
       currentBalance,
       monthIncome,
@@ -181,11 +173,8 @@ export const DashboardPage: React.FC = () => {
       topFrequentCategory,
       categoryList,
       frequencyList,
-      totalBudget,
-      budgetedExpense,
-      budgetPercent,
     };
-  }, [activeAccountTransactions, currentMonthTransactions, categories, budgets]);
+  }, [activeAccountTransactions, currentMonthTransactions, categories]);
 
   // Top 5 Largest Expenses this month
   const top5Expenses = useMemo(() => {
@@ -461,8 +450,8 @@ export const DashboardPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Secondary Highlights: Largest Expense, Top Category, Frequency & Budget Progress */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+      {/* Secondary Highlights: Largest Expense, Top Category, Frequency */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
         {/* Pengeluaran Terbesar */}
         <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800">
           <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
@@ -500,34 +489,6 @@ export const DashboardPage: React.FC = () => {
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 tabular-nums">
             {stats.topFrequentCategory ? `${stats.topFrequentCategory.count} kali transaksi` : 'Belum ada'}
           </p>
-        </div>
-
-        {/* Budget Bulan Berjalan */}
-        <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between text-[11px] font-medium text-slate-500 dark:text-slate-400">
-              <span>Budget Bulan Berjalan</span>
-              <span className="font-bold text-slate-900 dark:text-white tabular-nums">
-                {stats.budgetPercent}%
-              </span>
-            </div>
-            <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden mt-2">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${
-                  stats.budgetPercent > 90
-                    ? 'bg-rose-500'
-                    : stats.budgetPercent > 75
-                    ? 'bg-amber-500'
-                    : 'bg-emerald-500'
-                }`}
-                style={{ width: `${Math.min(stats.budgetPercent, 100)}%` }}
-              />
-            </div>
-          </div>
-          <div className="text-[11px] text-slate-400 mt-1 flex justify-between">
-            <span>Pakai: {formatRupiah(stats.budgetedExpense)}</span>
-            <span>Total: {formatRupiah(stats.totalBudget)}</span>
-          </div>
         </div>
       </div>
 
@@ -852,7 +813,7 @@ export const DashboardPage: React.FC = () => {
                         : 'bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400'
                     }`}
                   >
-                    <CategoryIcon name={tx.categoryName || 'Lainnya'} className="w-5 h-5" />
+                    <CategoryIcon name={categoryMap.get(tx.categoryId)?.icon || tx.categoryName || 'Lainnya'} className="w-5 h-5" />
                   </div>
                   <div className="min-w-0">
                     <div className="text-xs sm:text-sm font-semibold text-slate-900 dark:text-white truncate">

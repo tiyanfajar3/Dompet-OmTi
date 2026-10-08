@@ -12,8 +12,6 @@ import {
   ReceiptText,
   HandCoins,
   BarChart3,
-  PieChart,
-  Repeat,
   Settings,
   ChevronRight,
   LogOut
@@ -74,10 +72,8 @@ export const Navbar: React.FC = () => {
   }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, description: 'Beranda & saldo kas' },
     { id: 'transactions', label: 'Transaksi', icon: ReceiptText, description: 'Riwayat & filter pembukuan' },
-    { id: 'debts', label: 'Piutang', icon: HandCoins, description: 'Catatan pinjaman & tempo', badge: unpaidDebtsCount },
+    { id: 'debts', label: 'Utang & Piutang', icon: HandCoins, description: 'Utang, piutang & tagihan wajib', badge: unpaidDebtsCount },
     { id: 'reports', label: 'Laporan', icon: BarChart3, description: 'Statistik & analisis arus kas' },
-    { id: 'budgets', label: 'Anggaran', icon: PieChart, description: 'Target batas pengeluaran' },
-    { id: 'recurring', label: 'Rutin', icon: Repeat, description: 'Transaksi berkala & otomatis' },
     { id: 'profile', label: 'Pengaturan', icon: Settings, description: 'Profil, cabang & cadangan' },
   ];
 

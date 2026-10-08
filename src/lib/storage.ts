@@ -18,7 +18,8 @@ import {
   UserProfile, 
   BackupData,
   Debt,
-  DebtStatus 
+  DebtStatus,
+  DebtType 
 } from '../types';
 import { generateSalt, hashPassword } from './crypto';
 import { db, OperationType, handleFirestoreError, testFirestoreConnection, ensureAuthenticated } from './firebase';
@@ -321,6 +322,16 @@ export function getTransactionBranch(tx: Transaction | any, activeAdminId?: stri
 
 // Storage Public API backed by Cloud Firestore with local storage fallback
 export const storageService = {
+  getLocalUsers(): UserProfile[] {
+    return getLocalUsers();
+  },
+  saveLocalUser(user: UserProfile): void {
+    saveLocalUser(user);
+  },
+  deleteLocalUser(userId: string): void {
+    deleteLocalUser(userId);
+  },
+
   // Profile & User Accounts
   async getProfile(userId = 'owner_1'): Promise<UserProfile | null> {
     try {
@@ -502,6 +513,9 @@ export const storageService = {
           receiptImages: Array.isArray(data.receiptImages) ? data.receiptImages : [],
           isRecurringInstance: !!data.isRecurringInstance,
           recurringId: data.recurringId,
+          linkedDebtId: data.linkedDebtId || undefined,
+          linkedDebtType: (data.linkedDebtType as DebtType) || undefined,
+          linkedDebtName: data.linkedDebtName || undefined,
           createdAt: normalizedCreatedAt,
           updatedAt: normalizedUpdatedAt,
         };
@@ -557,6 +571,9 @@ export const storageService = {
         receiptImages: Array.isArray(transaction.receiptImages) ? transaction.receiptImages : [],
         isRecurringInstance: !!transaction.isRecurringInstance,
         recurringId: transaction.recurringId,
+        linkedDebtId: transaction.linkedDebtId || deleteField(),
+        linkedDebtType: transaction.linkedDebtType || deleteField(),
+        linkedDebtName: transaction.linkedDebtName || deleteField(),
         createdAt: transaction.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
@@ -859,16 +876,24 @@ export const storageService = {
       snap.docs.forEach((d) => {
         if (!d.id) return;
         const data = d.data();
+        const remAmount = typeof data.remainingAmount === 'number'
+          ? data.remainingAmount
+          : (typeof data.amount === 'number' ? data.amount : Number(data.amount) || 0);
         debtMap.set(d.id, {
           id: d.id,
           userId: data.userId || 'owner_1',
-          borrowerName: data.borrowerName || '',
+          type: (data.type as DebtType) || 'piutang',
+          title: data.title || '',
+          borrowerName: data.borrowerName || data.title || '',
           amount: typeof data.amount === 'number' ? data.amount : Number(data.amount) || 0,
+          remainingAmount: remAmount,
+          monthlyInstallment: typeof data.monthlyInstallment === 'number' ? data.monthlyInstallment : (data.monthlyInstallment ? Number(data.monthlyInstallment) : undefined),
           dueDate: data.dueDate || new Date().toISOString().split('T')[0],
           notes: data.notes || '',
-          status: (data.status as DebtStatus) || 'unpaid',
+          status: (data.status as DebtStatus) || (remAmount <= 0 ? 'paid' : 'unpaid'),
           proofUrl: data.proofUrl || '',
           createdAt: data.createdAt || new Date().toISOString(),
+          updatedAt: data.updatedAt || undefined,
         });
       });
 
@@ -879,26 +904,34 @@ export const storageService = {
       return sorted;
     } catch (error) {
       const err = handleFirestoreError(error, OperationType.LIST, COLLECTIONS.DEBTS);
-      throw new Error(err.error || 'Gagal memuat catatan piutang dari Firestore.');
+      throw new Error(err.error || 'Gagal memuat catatan utang & piutang dari Firestore.');
     }
   },
 
   async saveDebt(debt: Debt): Promise<Debt> {
     if (!debt.id) {
-      throw new Error('ID dokumen piutang tidak valid.');
+      throw new Error('ID dokumen utang/piutang tidak valid.');
     }
     try {
       const docRef = doc(db, COLLECTIONS.DEBTS, debt.id);
+      const remAmount = typeof debt.remainingAmount === 'number'
+        ? debt.remainingAmount
+        : Number(debt.amount) || 0;
       const dataToSave = cleanFirestoreData({
         id: debt.id,
         userId: debt.userId || 'owner_1',
+        type: debt.type || 'piutang',
+        title: (debt.title || '').trim(),
         borrowerName: debt.borrowerName.trim(),
         amount: Number(debt.amount) || 0,
+        remainingAmount: remAmount,
+        monthlyInstallment: debt.monthlyInstallment ? Number(debt.monthlyInstallment) : undefined,
         dueDate: debt.dueDate,
         notes: debt.notes || '',
-        status: debt.status || 'unpaid',
+        status: debt.status || (remAmount <= 0 ? 'paid' : 'unpaid'),
         proofUrl: debt.proofUrl || '',
         createdAt: debt.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       });
       await setDoc(docRef, dataToSave, { merge: true });
       return {
@@ -972,6 +1005,9 @@ export const storageService = {
             receiptImages: Array.isArray(data.receiptImages) ? data.receiptImages : [],
             isRecurringInstance: !!data.isRecurringInstance,
             recurringId: data.recurringId,
+            linkedDebtId: data.linkedDebtId || undefined,
+            linkedDebtType: (data.linkedDebtType as DebtType) || undefined,
+            linkedDebtName: data.linkedDebtName || undefined,
             createdAt: normalizedCreatedAt,
             updatedAt: normalizedUpdatedAt,
           };
@@ -1118,16 +1154,24 @@ export const storageService = {
         snapshot.docs.forEach((d) => {
           if (!d.id) return;
           const data = d.data();
+          const remAmount = typeof data.remainingAmount === 'number'
+            ? data.remainingAmount
+            : (typeof data.amount === 'number' ? data.amount : Number(data.amount) || 0);
           debtMap.set(d.id, {
             id: d.id,
             userId: data.userId || 'owner_1',
-            borrowerName: data.borrowerName || '',
+            type: (data.type as DebtType) || 'piutang',
+            title: data.title || '',
+            borrowerName: data.borrowerName || data.title || '',
             amount: typeof data.amount === 'number' ? data.amount : Number(data.amount) || 0,
+            remainingAmount: remAmount,
+            monthlyInstallment: typeof data.monthlyInstallment === 'number' ? data.monthlyInstallment : (data.monthlyInstallment ? Number(data.monthlyInstallment) : undefined),
             dueDate: data.dueDate || new Date().toISOString().split('T')[0],
             notes: data.notes || '',
-            status: (data.status as DebtStatus) || 'unpaid',
+            status: (data.status as DebtStatus) || (remAmount <= 0 ? 'paid' : 'unpaid'),
             proofUrl: data.proofUrl || undefined,
             createdAt: data.createdAt || new Date().toISOString(),
+            updatedAt: data.updatedAt || undefined,
           });
         });
 

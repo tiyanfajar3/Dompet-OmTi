@@ -33,7 +33,8 @@ import {
 import { ThemeMode, Category, PaymentMethod, UserRole, UserProfile } from '../../types';
 import { storageService } from '../../lib/storage';
 import { compressImage } from '../../lib/imageCompressor';
-import { CategoryIcon } from '../common/CategoryIcon';
+import { CategoryIcon, getCategoryEmoji } from '../common/CategoryIcon';
+import { IconPicker } from '../common/IconPicker';
 
 export const ProfileSettingsPage: React.FC = () => {
   const { 
@@ -114,6 +115,7 @@ export const ProfileSettingsPage: React.FC = () => {
   const [isCatModalOpen, setIsCatModalOpen] = useState(false);
   const [catName, setCatName] = useState('');
   const [catType, setCatType] = useState<'income' | 'expense'>('expense');
+  const [catIcon, setCatIcon] = useState('Utensils');
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
 
   const [isMethodModalOpen, setIsMethodModalOpen] = useState(false);
@@ -444,16 +446,18 @@ export const ProfileSettingsPage: React.FC = () => {
         ...editingCategory,
         name: catName.trim(),
         type: catType,
+        icon: catIcon || 'MoreHorizontal',
       });
     } else {
       await addCategory({
         name: catName.trim(),
         type: catType,
-        icon: 'MoreHorizontal',
+        icon: catIcon || 'MoreHorizontal',
         color: catType === 'income' ? '#10b981' : '#f97316',
       });
     }
     setCatName('');
+    setCatIcon('Utensils');
     setEditingCategory(null);
     setIsCatModalOpen(false);
   };
@@ -968,6 +972,7 @@ export const ProfileSettingsPage: React.FC = () => {
                   setEditingCategory(null);
                   setCatName('');
                   setCatType('expense');
+                  setCatIcon('Utensils');
                   setIsCatModalOpen(true);
                 }}
                 className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1 font-semibold cursor-pointer"
@@ -979,18 +984,32 @@ export const ProfileSettingsPage: React.FC = () => {
             <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 pr-1">
               {categories.map((c) => (
                 <div key={c.id} className="py-2.5 flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2">
-                    <CategoryIcon name={c.name} className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
-                    <span className="font-medium text-slate-800 dark:text-slate-200">{c.name}</span>
-                    <span className="text-[10px] text-slate-400">({c.type === 'income' ? 'Masuk' : 'Keluar'})</span>
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-2xs ${
+                      c.type === 'income' 
+                        ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200/60 dark:border-emerald-800/60' 
+                        : 'bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 border border-rose-200/60 dark:border-rose-800/60'
+                    }`}>
+                      <CategoryIcon name={c.icon || c.name} className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <span className="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 truncate">
+                        <span>{c.name}</span>
+                        <span className="text-xs">{getCategoryEmoji(c.icon || c.name)}</span>
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        {c.type === 'income' ? 'Pemasukan' : 'Pengeluaran'}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 shrink-0">
                     <button
                       type="button"
                       onClick={() => {
                         setEditingCategory(c);
                         setCatName(c.name);
                         setCatType(c.type);
+                        setCatIcon(c.icon || 'MoreHorizontal');
                         setIsCatModalOpen(true);
                       }}
                       className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
@@ -1731,6 +1750,13 @@ export const ProfileSettingsPage: React.FC = () => {
                   <option value="income" className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">Pemasukan</option>
                 </select>
               </div>
+
+              <IconPicker
+                value={catIcon}
+                onChange={setCatIcon}
+                type={catType}
+                label="Pilih Ikon Kategori"
+              />
 
               <div className="flex justify-end gap-2 pt-2">
                 <button

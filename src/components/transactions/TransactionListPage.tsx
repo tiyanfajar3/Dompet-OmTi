@@ -112,6 +112,10 @@ export const TransactionListPage: React.FC = () => {
     return users.filter((u) => u.id !== adminId && u.id !== 'owner_1');
   }, [users, profile?.id]);
 
+  const categoryMap = useMemo(() => {
+    return new Map(categories.map((c) => [c.id, c]));
+  }, [categories]);
+
   // Helper info akun pemilik transaksi
   const getAccountInfo = (userId?: string) => {
     const uid = userId || 'owner_1';
@@ -990,7 +994,7 @@ export const TransactionListPage: React.FC = () => {
                       : 'bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400'
                   }`}
                 >
-                  <CategoryIcon name={tx.categoryName || 'Lainnya'} className="w-5 h-5" />
+                  <CategoryIcon name={categoryMap.get(tx.categoryId)?.icon || tx.categoryName || 'Lainnya'} className="w-5 h-5" />
                 </div>
 
                 <div className="min-w-0">
@@ -1003,6 +1007,14 @@ export const TransactionListPage: React.FC = () => {
                     <span className="font-medium text-slate-700 dark:text-slate-300">{tx.categoryName}</span>
                     <span>&middot;</span>
                     <span>{tx.paymentMethod}</span>
+                    {tx.linkedDebtId && (
+                      <>
+                        <span>&middot;</span>
+                        <span className="px-1.5 py-0.2 rounded text-[10px] bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200/60 dark:border-amber-800/60 font-medium">
+                          {tx.linkedDebtName ? `Bayar: ${tx.linkedDebtName}` : 'Bayar Utang/Tagihan'}
+                        </span>
+                      </>
+                    )}
                     {isAdmin && (
                       <>
                         <span>&middot;</span>
@@ -1124,10 +1136,11 @@ export const TransactionListPage: React.FC = () => {
                   {formatIndonesianDate(detailTx.date, { withDay: true })}
                 </span>
               </div>
-              <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex justify-between items-center py-1.5 border-b border-slate-100 dark:border-slate-800">
                 <span className="text-slate-500">Kategori:</span>
-                <span className="font-medium text-slate-800 dark:text-slate-200">
-                  {detailTx.categoryName || 'Lainnya'}
+                <span className="font-medium text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                  <CategoryIcon name={categoryMap.get(detailTx.categoryId)?.icon || detailTx.categoryName || 'Lainnya'} className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  <span>{detailTx.categoryName || 'Lainnya'}</span>
                 </span>
               </div>
               <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-slate-800">
@@ -1136,6 +1149,14 @@ export const TransactionListPage: React.FC = () => {
                   {detailTx.paymentMethod}
                 </span>
               </div>
+              {detailTx.linkedDebtId && (
+                <div className="flex justify-between items-center py-1.5 border-b border-slate-100 dark:border-slate-800">
+                  <span className="text-slate-500">Tautan Utang/Tagihan:</span>
+                  <span className="font-semibold text-amber-700 dark:text-amber-300 text-xs">
+                    {detailTx.linkedDebtName || 'Pembayaran Terhubung'}
+                  </span>
+                </div>
+              )}
               {isAdmin && (
                 <div className="flex items-center justify-between py-1.5 border-b border-slate-100 dark:border-slate-800">
                   <span className="text-slate-500">Akun / Cabang:</span>

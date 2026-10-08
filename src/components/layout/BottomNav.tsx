@@ -6,8 +6,6 @@ import {
   HandCoins,
   LayoutGrid,
   BarChart3, 
-  PieChart, 
-  Repeat,
   Settings,
   User, 
   Plus,
@@ -66,7 +64,7 @@ export const BottomNav: React.FC = () => {
   const unpaidDebtsCount = debts ? debts.filter(d => d.status === 'unpaid').length : 0;
 
   // Active status check for "Lainnya" button
-  const isMoreTabActive = ['reports', 'budgets', 'recurring', 'profile'].includes(activeTab);
+  const isMoreTabActive = ['reports', 'profile'].includes(activeTab);
 
   const moreMenuItems: {
     id: ActiveTab;
@@ -76,12 +74,10 @@ export const BottomNav: React.FC = () => {
     badge?: number;
   }[] = [
     { id: 'reports', label: 'Laporan Keuangan', description: 'Analisis kas & perbandingan', icon: BarChart3 },
-    { id: 'budgets', label: 'Target Anggaran', description: 'Batas belanja bulanan', icon: PieChart },
-    { id: 'recurring', label: 'Transaksi Rutin', description: 'Otomatis & berkala', icon: Repeat },
     { id: 'profile', label: 'Pengaturan & Profil', description: 'Akun, cabang & sistem', icon: Settings },
     { id: 'dashboard', label: 'Beranda / Dashboard', description: 'Ringkasan saldo & kas', icon: LayoutDashboard },
     { id: 'transactions', label: 'Daftar Transaksi', description: 'Riwayat pembukuan kas', icon: ReceiptText },
-    { id: 'debts', label: 'Catatan Piutang', description: 'Pinjaman & jatuh tempo', icon: HandCoins, badge: unpaidDebtsCount },
+    { id: 'debts', label: 'Utang & Tagihan', description: 'Utang, piutang & tagihan wajib', icon: HandCoins, badge: unpaidDebtsCount },
   ];
 
   return (
