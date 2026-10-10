@@ -10,7 +10,8 @@ import {
   ThemeMode, 
   TransactionType, 
   UserRole, 
-  Debt 
+  Debt,
+  DebtStatus 
 } from '../types';
 import { storageService, initializeDatabase, getLocalUsers } from '../lib/storage';
 import { verifyPassword, hashPassword, generateSalt } from '../lib/crypto';

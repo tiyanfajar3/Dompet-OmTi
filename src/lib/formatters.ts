@@ -20,18 +20,30 @@ export function parseRupiahInput(value: string): number {
   return isNaN(parsed) ? 0 : parsed;
 }
 
-export function getGreetingForTuanMuda(name?: string): { greeting: string; periodText: string } {
-  const userName = name?.trim() || 'Tuan Muda';
+export function getTimeGreeting(name?: string): { greeting: string; periodText: string } {
   const hour = new Date().getHours();
+  let timeStr = 'Selamat malam';
+  let periodText = 'Istirahat dengan tenang, keuangan Anda terpantau rapi.';
+  
   if (hour >= 4 && hour < 11) {
-    return { greeting: `Selamat pagi, ${userName}`, periodText: 'Pagi yang cerah untuk meninjau keuangan Anda.' };
+    timeStr = 'Selamat pagi';
+    periodText = 'Pagi yang cerah untuk meninjau keuangan Anda.';
   } else if (hour >= 11 && hour < 15) {
-    return { greeting: `Selamat siang, ${userName}`, periodText: 'Semoga hari Anda produktif dan berkah.' };
+    timeStr = 'Selamat siang';
+    periodText = 'Semoga hari Anda produktif dan berkah.';
   } else if (hour >= 15 && hour < 18) {
-    return { greeting: `Selamat sore, ${userName}`, periodText: 'Waktu yang tepat memeriksa catatan transaksi hari ini.' };
-  } else {
-    return { greeting: `Selamat malam, ${userName}`, periodText: 'Istirahat dengan tenang, keuangan Anda terpantau rapi.' };
+    timeStr = 'Selamat sore';
+    periodText = 'Waktu yang tepat memeriksa catatan transaksi hari ini.';
   }
+
+  const cleanName = name?.trim();
+  const greeting = cleanName ? `${timeStr}, ${cleanName}` : timeStr;
+
+  return { greeting, periodText };
+}
+
+export function getGreetingForTuanMuda(name?: string): { greeting: string; periodText: string } {
+  return getTimeGreeting(name);
 }
 
 export interface ParsedDateInfo {

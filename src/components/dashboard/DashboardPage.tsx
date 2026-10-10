@@ -25,7 +25,8 @@ import {
   getGreetingForTuanMuda, 
   formatIndonesianDate, 
   formatIndonesianMonthYear,
-  parseFlexibleDate
+  parseFlexibleDate,
+  getTodayDateString
 } from '../../lib/formatters';
 import { CategoryIcon } from '../common/CategoryIcon';
 import { ReceiptViewerModal } from '../common/ReceiptViewerModal';
@@ -148,7 +149,6 @@ export const DashboardPage: React.FC = () => {
       }
     });
 
-    const netCashflow = monthIncome - monthExpense;
     const largestExpenseDescription = largestExpenseItem
       ? ((largestExpenseItem as Transaction).description || (largestExpenseItem as Transaction).categoryName || 'Pengeluaran')
       : 'Belum ada pengeluaran';
@@ -164,9 +164,10 @@ export const DashboardPage: React.FC = () => {
 
     return {
       currentBalance,
+      allTimeIncome,
+      allTimeExpense,
       monthIncome,
       monthExpense,
-      netCashflow,
       largestExpenseAmount,
       largestExpenseDescription,
       topExpenseCategory,
@@ -206,9 +207,15 @@ export const DashboardPage: React.FC = () => {
     return { days, maxDaySpend };
   }, [currentMonthTransactions, currentYear, currentMonth]);
 
-  // Recent 5 Transactions
-  const recentTransactions = useMemo(() => {
-    return activeAccountTransactions.slice(0, 5);
+  // Transaksi Hari Ini (Filter khusus tanggal hari ini YYYY-MM-DD)
+  const todayTransactions = useMemo(() => {
+    const todayDateStr = getTodayDateString();
+    return activeAccountTransactions
+      .filter((tx) => {
+        const parsed = parseFlexibleDate(tx.date || tx.createdAt);
+        return parsed ? parsed.dateStr === todayDateStr : false;
+      })
+      .sort((a, b) => (b.createdAt || b.date || '').localeCompare(a.createdAt || a.date || ''));
   }, [activeAccountTransactions]);
 
   const viewReceipt = (tx: Transaction) => {
@@ -375,8 +382,8 @@ export const DashboardPage: React.FC = () => {
         </div>
       )}
 
-      {/* Primary KPI Grid: Saldo, Pemasukan, Pengeluaran, Selisih */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+      {/* Primary KPI Grid: Saldo, Total Pemasukan, Total Pengeluaran */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
         {/* Saldo Saat Ini */}
         <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs">
           <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-2">
@@ -397,55 +404,35 @@ export const DashboardPage: React.FC = () => {
           </p>
         </div>
 
-        {/* Pemasukan Bulan Ini */}
+        {/* Total Pemasukan */}
         <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs">
           <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-2">
-            <span className="font-medium">Pemasukan Bulan Ini</span>
+            <span className="font-medium">Total Pemasukan</span>
             <div className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400">
               <TrendingUp className="w-4 h-4" />
             </div>
           </div>
           <div className="text-2xl font-bold tracking-tight tabular-nums text-emerald-600 dark:text-emerald-400">
-            {formatRupiah(stats.monthIncome)}
+            {formatRupiah(stats.allTimeIncome)}
           </div>
           <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 truncate">
-            {selectedAccountFilter === 'all'
-              ? `Konsolidasi seluruh akun · ${formatIndonesianMonthYear(currentYear, currentMonth)}`
-              : `${activeAccountShortName} · ${formatIndonesianMonthYear(currentYear, currentMonth)}`}
+            Akumulasi seluruh pemasukan
           </p>
         </div>
 
-        {/* Pengeluaran Bulan Ini */}
+        {/* Total Pengeluaran */}
         <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs">
           <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-2">
-            <span className="font-medium">Pengeluaran Bulan Ini</span>
+            <span className="font-medium">Total Pengeluaran</span>
             <div className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400">
               <TrendingDown className="w-4 h-4" />
             </div>
           </div>
           <div className="text-2xl font-bold tracking-tight tabular-nums text-rose-600 dark:text-rose-400">
-            {formatRupiah(stats.monthExpense)}
+            {formatRupiah(stats.allTimeExpense)}
           </div>
           <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 truncate">
-            {selectedAccountFilter === 'all'
-              ? 'Biaya gabungan seluruh cabang'
-              : `Biaya operasional: ${activeAccountShortName}`}
-          </p>
-        </div>
-
-        {/* Selisih (Cash Flow) */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs">
-          <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-2">
-            <span className="font-medium">Selisih Kas (Net)</span>
-            <div className={`p-1.5 rounded-lg ${stats.netCashflow >= 0 ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400' : 'bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400'}`}>
-              <Activity className="w-4 h-4" />
-            </div>
-          </div>
-          <div className={`text-2xl font-bold tracking-tight tabular-nums ${stats.netCashflow >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-            {formatRupiah(stats.netCashflow)}
-          </div>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
-            {stats.netCashflow >= 0 ? 'Surplus kas aman terkendali' : 'Defisit kas bulan berjalan'}
+            Akumulasi seluruh pengeluaran
           </p>
         </div>
       </div>
@@ -763,44 +750,64 @@ export const DashboardPage: React.FC = () => {
         )}
       </div>
 
-      {/* Ringkasan Transaksi Terbaru */}
+      {/* Transaksi Hari Ini */}
       <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h2 className="text-sm font-bold text-slate-900 dark:text-white">
-              Ringkasan Transaksi Terbaru
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Catatan transaksi terkini di akun Anda
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+                Transaksi Hari Ini
+              </h2>
+              {todayTransactions.length > 0 && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                  {todayTransactions.length} transaksi
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Catatan transaksi yang masuk pada hari ini
             </p>
           </div>
           <button
             onClick={() => setActiveTab('transactions')}
-            className="text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1"
+            className="text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer"
           >
             <span>Lihat Semua</span>
             <ChevronRight className="w-3.5 h-3.5" />
           </button>
         </div>
 
-        {recentTransactions.length === 0 ? (
+        {todayTransactions.length === 0 ? (
           <div className="py-12 text-center">
             <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-400 mx-auto flex items-center justify-center mb-3">
-              <Receipt className="w-6 h-6" />
+              <Calendar className="w-6 h-6" />
             </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Belum ada transaksi tersimpan.
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+              Belum ada transaksi hari ini
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm mx-auto">
+              Belum ada catatan pemasukan atau pengeluaran yang tercatat pada tanggal hari ini.
             </p>
-            <button
-              onClick={() => openAddModal('expense')}
-              className="mt-3 px-3.5 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition"
-            >
-              + Catat Transaksi Pertama
-            </button>
+            <div className="mt-4 flex items-center justify-center gap-2">
+              <button
+                onClick={() => openAddModal('income')}
+                className="px-3.5 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition cursor-pointer flex items-center gap-1 shadow-xs"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>+ Pemasukan</span>
+              </button>
+              <button
+                onClick={() => openAddModal('expense')}
+                className="px-3.5 py-1.5 text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white rounded-xl transition cursor-pointer flex items-center gap-1 shadow-xs"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>+ Pengeluaran</span>
+              </button>
+            </div>
           </div>
         ) : (
           <div className="divide-y divide-slate-100 dark:divide-slate-800/80">
-            {recentTransactions.map((tx) => (
+            {todayTransactions.map((tx) => (
               <div
                 key={tx.id}
                 className="py-3 flex items-center justify-between gap-3 group"

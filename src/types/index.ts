@@ -124,6 +124,8 @@ export interface Debt {
   amount: number; // Total nominal utang / piutang / tagihan
   remainingAmount?: number; // Sisa saldo yang belum dibayar / lunas
   monthlyInstallment?: number; // Target cicilan bulanan (contoh: Rp 1.500.000 / bln)
+  tenorMonths?: number; // Tenor / jangka waktu cicilan dalam bulan (contoh: 12)
+  dueDay?: number; // Tanggal rutin per bulan (1 - 31) untuk utang & tagihan wajib
   dueDate: string; // YYYY-MM-DD
   notes?: string;
   status: DebtStatus;

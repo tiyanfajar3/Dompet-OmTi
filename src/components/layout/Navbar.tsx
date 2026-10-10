@@ -5,7 +5,6 @@ import {
   Sun, 
   Moon, 
   Monitor, 
-  Wallet,
   Menu,
   X,
   LayoutDashboard,
@@ -89,16 +88,18 @@ export const Navbar: React.FC = () => {
         <div className="flex items-center gap-3">
           <button 
             onClick={() => handleSelectTab('dashboard')}
-            className="flex items-center gap-2.5 text-left group"
+            className="flex items-center gap-2.5 text-left group cursor-pointer"
           >
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-700 flex items-center justify-center text-white shadow-md shadow-emerald-500/20 group-hover:scale-105 transition">
-              <Wallet className="w-5 h-5" />
-            </div>
-            <div>
+            <img 
+              src="/logo-dompet.png" 
+              alt="Logo Dompet Omti" 
+              className="h-8 w-8 sm:h-9 sm:w-9 object-contain shrink-0 group-hover:scale-105 transition-transform" 
+            />
+            <div className="flex items-center gap-2">
               <span className="text-lg font-bold tracking-tight text-slate-900 dark:text-white whitespace-nowrap">
                 Dompet Omti
               </span>
-              <span className="hidden sm:inline-block ml-2 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+              <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                 {profile?.role === 'admin' ? 'Tuan Muda' : (profile?.displayName || 'Pengguna')}
               </span>
             </div>
