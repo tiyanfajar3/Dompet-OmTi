@@ -14,11 +14,26 @@ import {
   CalendarClock,
   CreditCard,
   ShieldCheck,
-  Sparkles
+  Sparkles,
+  ExternalLink,
+  Clock
 } from 'lucide-react';
 import { motion, type Variants } from 'motion/react';
-import { getTimeGreeting } from '../../lib/formatters';
+import { getTimeGreeting, getWhatsAppRegistrationUrl } from '../../lib/formatters';
 import { ThemeMode } from '../../types';
+
+// WhatsApp brand icon SVG
+const WhatsAppIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
+  <svg
+    className={className}
+    viewBox="0 0 24 24"
+    fill="currentColor"
+    xmlns="http://www.w3.org/2000/svg"
+    aria-hidden="true"
+  >
+    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L0 24l6.335-1.662c1.746.953 3.71 1.455 5.712 1.456h.005c6.554 0 11.89-5.335 11.893-11.893a11.82 11.82 0 00-3.483-8.414z"/>
+  </svg>
+);
 
 export const LoginPage: React.FC = () => {
   const { login, theme, setTheme } = useApp();
@@ -42,6 +57,18 @@ export const LoginPage: React.FC = () => {
       const msg = sessionStorage.getItem('dompet_omti_reset_msg');
       if (msg) {
         sessionStorage.removeItem('dompet_omti_reset_msg');
+        return msg;
+      }
+    } catch {}
+    return null;
+  });
+
+  // Check if session timeout notification flag exists in sessionStorage
+  const [timeoutMessage] = useState<string | null>(() => {
+    try {
+      const msg = sessionStorage.getItem('dompet_omti_session_timeout_msg');
+      if (msg) {
+        sessionStorage.removeItem('dompet_omti_session_timeout_msg');
         return msg;
       }
     } catch {}
@@ -265,6 +292,23 @@ export const LoginPage: React.FC = () => {
             </motion.div>
           )}
 
+          {/* Session Timeout Warning Banner */}
+          {timeoutMessage && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-4 p-3.5 text-xs text-amber-900 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/80 border border-amber-300 dark:border-amber-700/80 rounded-2xl flex items-center gap-2.5 shadow-sm"
+            >
+              <Clock className="w-4.5 h-4.5 text-amber-600 dark:text-amber-400 shrink-0" />
+              <div className="flex-1">
+                <span className="font-bold block text-[11px] uppercase tracking-wider text-amber-700 dark:text-amber-400">
+                  Sesi Berakhir Otomatis
+                </span>
+                <span className="text-xs leading-relaxed">{timeoutMessage}</span>
+              </div>
+            </motion.div>
+          )}
+
           {/* Glassmorphic Login Card */}
           <div className="relative rounded-3xl bg-white/85 dark:bg-slate-900/80 border border-slate-200/90 dark:border-slate-800/90 backdrop-blur-2xl p-7 sm:p-9 shadow-2xl shadow-slate-900/10 dark:shadow-emerald-950/20 overflow-hidden">
             {/* Subtle card top glow */}
@@ -358,7 +402,27 @@ export const LoginPage: React.FC = () => {
               </motion.button>
             </form>
 
-            <div className="mt-6 pt-5 border-t border-slate-200/70 dark:border-slate-800/80 flex items-center justify-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 text-center">
+            {/* Informasi Pendaftaran Akun & Link WhatsApp Dinamis */}
+            <div className="mt-5 pt-4 border-t border-slate-200/80 dark:border-slate-800/80 space-y-2.5">
+              <p className="text-xs text-slate-500 dark:text-slate-400 text-center leading-relaxed">
+                Belum memiliki akun brankas Dompet Omti? Silakan hubungi Tuan Muda untuk pendaftaran akun baru.
+              </p>
+              <a
+                href={getWhatsAppRegistrationUrl()}
+                onClick={(e) => {
+                  e.currentTarget.href = getWhatsAppRegistrationUrl();
+                }}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full py-2.5 px-4 rounded-xl font-semibold text-xs flex items-center justify-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 dark:bg-emerald-500/15 dark:hover:bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 transition-all shadow-xs hover:shadow-md hover:shadow-emerald-500/10 active:scale-[0.99] group cursor-pointer"
+              >
+                <WhatsAppIcon className="w-4 h-4 text-emerald-600 dark:text-emerald-400 group-hover:scale-110 transition-transform shrink-0" />
+                <span>Hubungi Tuan Muda via WhatsApp</span>
+                <ExternalLink className="w-3.5 h-3.5 text-emerald-600/70 dark:text-emerald-400/70 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform shrink-0" />
+              </a>
+            </div>
+
+            <div className="mt-4 pt-3.5 border-t border-slate-200/60 dark:border-slate-800/60 flex items-center justify-center gap-2 text-[11px] text-slate-400 dark:text-slate-500 text-center">
               <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0" />
               <span>Penyimpanan lokal privat & terenkripsi di browser</span>
             </div>

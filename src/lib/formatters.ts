@@ -46,6 +46,86 @@ export function getGreetingForTuanMuda(name?: string): { greeting: string; perio
   return getTimeGreeting(name);
 }
 
+/**
+ * Generate dynamic WhatsApp registration URL based on the user's current local hour.
+ * 05:00 - 10:59: "Halo Tuan Muda, selamat pagi. Saya ingin mendaftar akun baru untuk aplikasi Dompet Omti."
+ * 11:00 - 14:59: "Halo Tuan Muda, selamat siang. Saya ingin mendaftar akun baru untuk aplikasi Dompet Omti."
+ * 15:00 - 17:59: "Halo Tuan Muda, selamat sore. Saya ingin mendaftar akun baru untuk aplikasi Dompet Omti."
+ * 18:00 - 04:59: "Halo Tuan Muda, selamat malam. Saya ingin mendaftar akun baru untuk aplikasi Dompet Omti."
+ */
+export function getWhatsAppRegistrationUrl(phone = '6283838747836'): string {
+  const hour = new Date().getHours();
+  let timeOfDay = 'malam';
+
+  if (hour >= 5 && hour < 11) {
+    timeOfDay = 'pagi';
+  } else if (hour >= 11 && hour < 15) {
+    timeOfDay = 'siang';
+  } else if (hour >= 15 && hour < 18) {
+    timeOfDay = 'sore';
+  } else {
+    timeOfDay = 'malam';
+  }
+
+  const message = `Halo Tuan Muda, selamat ${timeOfDay}. Saya ingin mendaftar akun baru untuk aplikasi Dompet Omti.`;
+  return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+}
+
+/**
+ * Generate dynamic WhatsApp feedback URL based on user's current local hour.
+ */
+export function getWhatsAppFeedbackUrl(phone = '6283838747836', username?: string): string {
+  const hour = new Date().getHours();
+  let timeOfDay = 'malam';
+
+  if (hour >= 5 && hour < 11) {
+    timeOfDay = 'pagi';
+  } else if (hour >= 11 && hour < 15) {
+    timeOfDay = 'siang';
+  } else if (hour >= 15 && hour < 18) {
+    timeOfDay = 'sore';
+  } else {
+    timeOfDay = 'malam';
+  }
+
+  const userSuffix = username ? ` (dari @${username})` : '';
+  const message = `Halo Tuan Muda, selamat ${timeOfDay}. Saya ingin menyampaikan kritik/saran mengenai aplikasi Dompet Omti${userSuffix}...`;
+  return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+}
+
+/**
+ * Generate direct Gmail Webmail compose URL based on user's current local hour and username.
+ * Directly opens Gmail Web compose in the browser (mail.google.com) avoiding the Windows OS
+ * 'mailto:' protocol handler chooser dialog.
+ */
+export function getGmailFeedbackUrl(to = 'mursast03@gmail.com', username?: string): string {
+  const hour = new Date().getHours();
+  let timeOfDay = 'malam';
+
+  if (hour >= 5 && hour < 11) {
+    timeOfDay = 'pagi';
+  } else if (hour >= 11 && hour < 15) {
+    timeOfDay = 'siang';
+  } else if (hour >= 15 && hour < 18) {
+    timeOfDay = 'sore';
+  } else {
+    timeOfDay = 'malam';
+  }
+
+  const userSuffix = username ? ` (dari @${username})` : '';
+  const subject = `Kritik & Saran Dompet Omti${userSuffix}`;
+  const body = `Halo Tuan Muda, selamat ${timeOfDay}.
+
+Saya ingin menyampaikan masukan / kritik / saran / kendala terkait aplikasi Dompet Omti:
+
+[Tuliskan pesan Anda di sini]
+
+---
+Pengirim: ${username || 'Pengguna Dompet Omti'}`;
+
+  return `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
 export interface ParsedDateInfo {
   dateStr: string; // Standard YYYY-MM-DD
   year: number;

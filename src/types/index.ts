@@ -80,6 +80,36 @@ export interface RecurringTransaction {
 export type ThemeMode = 'light' | 'dark' | 'system';
 export type UserRole = 'admin' | 'user';
 
+export type Gender = 'Laki-laki' | 'Perempuan' | '';
+
+export interface UserBiodata {
+  fullName?: string;
+  birthPlace?: string;
+  birthDate?: string; // YYYY-MM-DD
+  gender?: Gender;
+  nationality?: string;
+  phone?: string;
+  email?: string;
+  hobbies?: string;
+}
+
+export type SocialPlatform =
+  | 'instagram'
+  | 'tiktok'
+  | 'twitter'
+  | 'facebook'
+  | 'youtube'
+  | 'linkedin'
+  | 'github'
+  | 'website'
+  | 'other';
+
+export interface SocialMediaItem {
+  id: string;
+  platform: SocialPlatform;
+  url: string;
+}
+
 export interface UserProfile {
   id: string;
   username: string;
@@ -91,6 +121,9 @@ export interface UserProfile {
   role: UserRole;
   createdAt: string;
   updatedAt: string;
+  profileData?: UserBiodata;
+  bioData?: UserBiodata;
+  socialMedia?: SocialMediaItem[];
 }
 
 export interface BackupData {
@@ -103,6 +136,8 @@ export interface BackupData {
     profilePhoto: string;
     theme: ThemeMode;
     role?: UserRole;
+    profileData?: UserBiodata;
+    socialMedia?: SocialMediaItem[];
   };
   transactions: Transaction[];
   categories: Category[];

@@ -32,6 +32,8 @@ import { CategoryIcon } from '../common/CategoryIcon';
 import { ReceiptViewerModal } from '../common/ReceiptViewerModal';
 import { ReceiptImage, Transaction } from '../../types';
 import { storageService } from '../../lib/storage';
+import { CashFlowTrend3DChart, DailyTrendData } from './CashFlowTrend3DChart';
+import { IncomeExpenseComparison3DChart } from './IncomeExpenseComparison3DChart';
 
 export const DashboardPage: React.FC = () => {
   const { 
@@ -185,26 +187,31 @@ export const DashboardPage: React.FC = () => {
       .slice(0, 5);
   }, [currentMonthTransactions]);
 
-  // Daily Trend Data for Current Month
-  const dailySpendingTrend = useMemo(() => {
+  // Daily Trend Data for Current Month (Income, Expense, and Net)
+  const dailyTrendData = useMemo<DailyTrendData[]>(() => {
     const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
-    const days: { day: number; amount: number }[] = [];
+    const days: DailyTrendData[] = [];
     for (let i = 1; i <= daysInMonth; i++) {
-      days.push({ day: i, amount: 0 });
+      days.push({ day: i, expense: 0, income: 0, net: 0 });
     }
 
     currentMonthTransactions.forEach((tx) => {
-      if (tx.type === 'expense') {
-        const parsed = parseFlexibleDate(tx.date || tx.createdAt);
-        const d = parsed ? parsed.day : parseInt(String(tx.date).split('-')[2], 10);
-        if (d >= 1 && d <= daysInMonth) {
-          days[d - 1].amount += tx.amount;
+      const parsed = parseFlexibleDate(tx.date || tx.createdAt);
+      const d = parsed ? parsed.day : parseInt(String(tx.date).split('-')[2], 10);
+      if (d >= 1 && d <= daysInMonth) {
+        if (tx.type === 'expense') {
+          days[d - 1].expense += tx.amount;
+        } else if (tx.type === 'income') {
+          days[d - 1].income += tx.amount;
         }
       }
     });
 
-    const maxDaySpend = Math.max(...days.map((d) => d.amount), 1);
-    return { days, maxDaySpend };
+    days.forEach((item) => {
+      item.net = item.income - item.expense;
+    });
+
+    return days;
   }, [currentMonthTransactions, currentYear, currentMonth]);
 
   // Transaksi Hari Ini (Filter khusus tanggal hari ini YYYY-MM-DD)
@@ -481,80 +488,12 @@ export const DashboardPage: React.FC = () => {
 
       {/* Charts Section: Pemasukan vs Pengeluaran & Donut Kategori */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* Chart 1: Pemasukan vs Pengeluaran Breakdown */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-sm font-bold text-slate-900 dark:text-white">
-                Pemasukan vs Pengeluaran
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Perbandingan kas masuk dan keluar bulan ini
-              </p>
-            </div>
-            <BarChart2 className="w-4 h-4 text-slate-400" />
-          </div>
-
-          <div className="space-y-4 pt-2">
-            {/* Pemasukan Bar */}
-            <div>
-              <div className="flex items-center justify-between text-xs mb-1.5">
-                <span className="font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                  Pemasukan
-                </span>
-                <span className="font-bold tabular-nums text-slate-900 dark:text-white">
-                  {formatRupiah(stats.monthIncome)}
-                </span>
-              </div>
-              <div className="w-full bg-slate-100 dark:bg-slate-800 h-4 rounded-xl overflow-hidden p-0.5">
-                <div
-                  className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 rounded-lg transition-all duration-700"
-                  style={{
-                    width: `${
-                      stats.monthIncome + stats.monthExpense > 0
-                        ? (stats.monthIncome / (stats.monthIncome + stats.monthExpense)) * 100
-                        : 0
-                    }%`,
-                  }}
-                />
-              </div>
-            </div>
-
-            {/* Pengeluaran Bar */}
-            <div>
-              <div className="flex items-center justify-between text-xs mb-1.5">
-                <span className="font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
-                  Pengeluaran
-                </span>
-                <span className="font-bold tabular-nums text-slate-900 dark:text-white">
-                  {formatRupiah(stats.monthExpense)}
-                </span>
-              </div>
-              <div className="w-full bg-slate-100 dark:bg-slate-800 h-4 rounded-xl overflow-hidden p-0.5">
-                <div
-                  className="h-full bg-gradient-to-r from-rose-500 to-red-500 rounded-lg transition-all duration-700"
-                  style={{
-                    width: `${
-                      stats.monthIncome + stats.monthExpense > 0
-                        ? (stats.monthExpense / (stats.monthIncome + stats.monthExpense)) * 100
-                        : 0
-                    }%`,
-                  }}
-                />
-              </div>
-            </div>
-
-            {/* Comparative Summary */}
-            <div className="mt-4 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 flex items-center justify-between text-xs text-slate-600 dark:text-slate-300">
-              <span>Rasio Pengeluaran terhadap Pemasukan:</span>
-              <span className="font-bold tabular-nums text-slate-900 dark:text-white">
-                {stats.monthIncome > 0 ? `${Math.round((stats.monthExpense / stats.monthIncome) * 100)}%` : '0%'}
-              </span>
-            </div>
-          </div>
-        </div>
+        {/* Chart 1: Pemasukan vs Pengeluaran (3D Depth & Glow) */}
+        <IncomeExpenseComparison3DChart
+          monthIncome={stats.monthIncome}
+          monthExpense={stats.monthExpense}
+          currentMonthTransactions={currentMonthTransactions}
+        />
 
         {/* Chart 2: Pengeluaran Berdasarkan Kategori (Visual Breakdown) */}
         <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs">
@@ -611,57 +550,11 @@ export const DashboardPage: React.FC = () => {
 
       {/* Chart 3 & 4: Tren Pengeluaran & Top 5 Pengeluaran */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* Tren Pengeluaran Harian */}
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-sm font-bold text-slate-900 dark:text-white">
-                Tren Pengeluaran Harian
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Pola pengeluaran per hari sepanjang bulan ini
-              </p>
-            </div>
-            <Activity className="w-4 h-4 text-slate-400" />
-          </div>
-
-          {/* Sparkline / Bar Graph */}
-          <div className="pt-2">
-            <div className="h-36 flex items-end gap-1 px-1 border-b border-slate-200 dark:border-slate-800">
-              {dailySpendingTrend.days.map((item) => {
-                const heightPercent = dailySpendingTrend.maxDaySpend > 0
-                  ? Math.max((item.amount / dailySpendingTrend.maxDaySpend) * 100, item.amount > 0 ? 8 : 2)
-                  : 2;
-                return (
-                  <div
-                    key={item.day}
-                    className="flex-1 flex flex-col items-center group relative h-full justify-end"
-                  >
-                    {/* Tooltip on hover */}
-                    <div className="absolute -top-9 z-20 hidden group-hover:flex flex-col items-center pointer-events-none">
-                      <div className="bg-slate-900 text-white text-[10px] py-1 px-1.5 rounded-md shadow-lg whitespace-nowrap tabular-nums">
-                        Tgl {item.day}: {formatRupiah(item.amount)}
-                      </div>
-                    </div>
-                    <div
-                      className={`w-full rounded-t-sm transition-all duration-300 ${
-                        item.amount > 0
-                          ? 'bg-emerald-500 group-hover:bg-emerald-400'
-                          : 'bg-slate-100 dark:bg-slate-800'
-                      }`}
-                      style={{ height: `${heightPercent}%` }}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-            <div className="flex justify-between text-[10px] text-slate-400 mt-2 px-1">
-              <span>Tgl 1</span>
-              <span>Tgl 15</span>
-              <span>Tgl {dailySpendingTrend.days.length}</span>
-            </div>
-          </div>
-        </div>
+        {/* Chart 3: Tren Arus Kas Harian (3D Glow, Spline & Area Gradients) */}
+        <CashFlowTrend3DChart
+          days={dailyTrendData}
+          currentMonthName={formatIndonesianMonthYear(currentYear, currentMonth)}
+        />
 
         {/* Top 5 Pengeluaran Terbesar */}
         <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-xs">

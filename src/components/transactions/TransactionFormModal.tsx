@@ -8,12 +8,16 @@ import {
   Plus, 
   Calendar, 
   ArrowUpRight, 
-  ArrowDownLeft,
-  Receipt,
-  AlertCircle,
-  Calculator,
-  HandCoins,
-  CheckCircle2
+  ArrowDownLeft, 
+  Receipt, 
+  AlertCircle, 
+  Calculator, 
+  HandCoins, 
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  SlidersHorizontal,
+  Link as LinkIcon
 } from 'lucide-react';
 import { TransactionType, ReceiptImage, Category, PaymentMethod, UserProfile, DebtType } from '../../types';
 import { parseRupiahInput, getTodayDateString, normalizeStandardDate, formatRupiah } from '../../lib/formatters';
@@ -23,7 +27,7 @@ import { storageService } from '../../lib/storage';
 import { CategoryIcon, getCategoryEmoji } from '../common/CategoryIcon';
 import { IconPicker } from '../common/IconPicker';
 
-// --- Sub-components memoized to prevent re-renders when nominal/description changes ---
+// --- Sub-components memoized to prevent re-renders ---
 
 interface TypeSwitcherProps {
   type: TransactionType;
@@ -31,14 +35,14 @@ interface TypeSwitcherProps {
 }
 const TypeSwitcherSection = React.memo<TypeSwitcherProps>(({ type, onSelectType }) => {
   return (
-    <div className="p-1 bg-slate-100 dark:bg-slate-800 rounded-xl grid grid-cols-2 gap-1">
+    <div className="p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl grid grid-cols-2 gap-1 border border-slate-200/60 dark:border-slate-700/60">
       <button
         type="button"
         onClick={() => onSelectType('expense')}
-        className={`py-2 px-3 text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-all cursor-pointer ${
+        className={`py-2 px-3 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
           type === 'expense'
-            ? 'bg-rose-600 text-white shadow-xs'
-            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            ? 'bg-rose-500 text-white shadow-sm shadow-rose-500/25 dark:bg-rose-600'
+            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/50 dark:hover:bg-slate-700/50'
         }`}
       >
         <ArrowUpRight className="w-4 h-4" />
@@ -47,10 +51,10 @@ const TypeSwitcherSection = React.memo<TypeSwitcherProps>(({ type, onSelectType 
       <button
         type="button"
         onClick={() => onSelectType('income')}
-        className={`py-2 px-3 text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-all cursor-pointer ${
+        className={`py-2 px-3 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
           type === 'income'
-            ? 'bg-emerald-600 text-white shadow-xs'
-            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            ? 'bg-emerald-500 text-white shadow-sm shadow-emerald-500/25 dark:bg-emerald-600'
+            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/50 dark:hover:bg-slate-700/50'
         }`}
       >
         <ArrowDownLeft className="w-4 h-4" />
@@ -79,37 +83,35 @@ const AccountSelectorSection = React.memo<AccountSelectorProps>(({
 }) => {
   if (!isAdmin) return null;
   return (
-    <div>
-      <div className="flex items-center justify-between mb-1.5">
-        <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-          Akun / Brankas Pemilik Transaksi
-        </label>
-        {isEditing && (
-          <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-medium">
-            Admin: Bebas memindahkan akun
-          </span>
-        )}
-      </div>
+    <div className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/70 text-xs">
+      <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 shrink-0">
+        👤 Akun / Brankas:
+      </span>
       <select
         value={targetUserId}
         onChange={(e) => onSelectUser(e.target.value)}
-        className="w-full px-3.5 py-2.5 text-xs font-semibold bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+        className="flex-1 bg-transparent text-slate-800 dark:text-slate-200 font-semibold text-xs border-0 focus:outline-hidden cursor-pointer truncate"
       >
         <optgroup label="Akun Admin (Default)">
-          <option value="owner_1">
-            👤 {profileDisplayName} (Kas Pribadi Admin)
+          <option value="owner_1" className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">
+            {profileDisplayName} (Kas Pribadi)
           </option>
         </optgroup>
         {branchUsers.length > 0 && (
           <optgroup label="Akun Cabang / Tenant">
             {branchUsers.map((u) => (
-              <option key={u.id} value={u.id}>
+              <option key={u.id} value={u.id} className="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200">
                 🏢 {u.displayName} (@{u.username})
               </option>
             ))}
           </optgroup>
         )}
       </select>
+      {isEditing && (
+        <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-medium shrink-0">
+          Ubah
+        </span>
+      )}
     </div>
   );
 });
@@ -132,7 +134,7 @@ const QuickAmountChips = React.memo<QuickAmountChipsProps>(({
           key={val}
           type="button"
           onClick={() => onAddAmount(val)}
-          className="px-2.5 py-1 text-[11px] font-medium rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-slate-700 transition cursor-pointer"
+          className="px-2 py-0.5 text-[11px] font-semibold rounded-lg bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200/80 dark:border-slate-600/80 hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-slate-600 dark:hover:text-emerald-300 transition cursor-pointer shadow-2xs"
         >
           +{val >= 1000000 ? `${val / 1000000}jt` : `${val / 1000}rb`}
         </button>
@@ -141,7 +143,7 @@ const QuickAmountChips = React.memo<QuickAmountChipsProps>(({
         <button
           type="button"
           onClick={onReset}
-          className="px-2 py-1 text-[11px] text-slate-400 hover:text-rose-500 transition cursor-pointer"
+          className="px-2 py-0.5 text-[11px] font-medium text-slate-400 hover:text-rose-500 transition cursor-pointer"
         >
           Reset
         </button>
@@ -183,8 +185,8 @@ const CategorySelectorSection = React.memo<CategorySelectorProps>(({
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-1.5">
-        <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+      <div className="flex items-center justify-between mb-1">
+        <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
           Kategori
         </label>
         <button
@@ -193,14 +195,14 @@ const CategorySelectorSection = React.memo<CategorySelectorProps>(({
             setIsAdding(true);
             setNewIcon(type === 'income' ? 'Wallet' : 'Utensils');
           }}
-          className="text-[11px] text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-0.5 cursor-pointer"
+          className="text-[10px] text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-0.5 cursor-pointer font-medium"
         >
           <Plus className="w-3 h-3" /> Tambah
         </button>
       </div>
 
       {isAdding ? (
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1">
           <IconPicker
             value={newIcon}
             onChange={setNewIcon}
@@ -209,40 +211,40 @@ const CategorySelectorSection = React.memo<CategorySelectorProps>(({
           />
           <input
             type="text"
-            placeholder="Nama kategori"
+            placeholder="Nama..."
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
-            className="flex-1 px-2.5 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white"
+            className="flex-1 min-w-0 px-2 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white"
             autoFocus
           />
           <button
             type="button"
             onClick={handleSave}
-            className="px-2.5 py-1.5 text-xs bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 cursor-pointer"
+            className="px-2 py-1.5 text-xs bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 cursor-pointer"
           >
-            Simpan
+            ✓
           </button>
           <button
             type="button"
             onClick={() => setIsAdding(false)}
-            className="p-1.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+            className="p-1 text-slate-400 hover:text-slate-600 cursor-pointer"
           >
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
       ) : (
         <div className="relative flex items-center">
-          <div className={`absolute left-2.5 z-10 pointer-events-none flex items-center justify-center w-6 h-6 rounded-lg ${
+          <div className={`absolute left-2 z-10 pointer-events-none flex items-center justify-center w-5 h-5 rounded-md ${
             type === 'income'
               ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-600 dark:text-emerald-400'
               : 'bg-rose-100 dark:bg-rose-950/70 text-rose-600 dark:text-rose-400'
           }`}>
-            <CategoryIcon name={selectedCategory?.icon || selectedCategory?.name || 'MoreHorizontal'} className="w-3.5 h-3.5" />
+            <CategoryIcon name={selectedCategory?.icon || selectedCategory?.name || 'MoreHorizontal'} className="w-3 h-3" />
           </div>
           <select
             value={categoryId}
             onChange={(e) => onSelectCategory(e.target.value)}
-            className="w-full pl-10 pr-3 py-2 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-hidden focus:border-emerald-500 transition cursor-pointer"
+            className="w-full pl-8 pr-2 py-2 text-xs font-medium bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-hidden focus:border-emerald-500 transition cursor-pointer truncate"
           >
             {categories.map((c) => (
               <option key={c.id} value={c.id} className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">
@@ -281,40 +283,40 @@ const PaymentMethodSelectorSection = React.memo<PaymentMethodSelectorProps>(({
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-1.5">
-        <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+      <div className="flex items-center justify-between mb-1">
+        <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
           Metode Pembayaran
         </label>
         <button
           type="button"
           onClick={() => setIsAdding(true)}
-          className="text-[11px] text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-0.5 cursor-pointer"
+          className="text-[10px] text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-0.5 cursor-pointer font-medium"
         >
-          <Plus className="w-3 h-3" /> Metode Baru
+          <Plus className="w-3 h-3" /> Baru
         </button>
       </div>
 
       {isAdding ? (
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1">
           <input
             type="text"
-            placeholder="Contoh: BCA, Mandiri, GoPay"
+            placeholder="Contoh: BCA, GoPay"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
-            className="flex-1 px-2.5 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white"
+            className="flex-1 min-w-0 px-2 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white"
             autoFocus
           />
           <button
             type="button"
             onClick={handleSave}
-            className="px-2.5 py-1.5 text-xs bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 cursor-pointer"
+            className="px-2 py-1.5 text-xs bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 cursor-pointer"
           >
-            Simpan
+            ✓
           </button>
           <button
             type="button"
             onClick={() => setIsAdding(false)}
-            className="p-1.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+            className="p-1 text-slate-400 hover:text-slate-600 cursor-pointer"
           >
             <X className="w-3.5 h-3.5" />
           </button>
@@ -323,11 +325,11 @@ const PaymentMethodSelectorSection = React.memo<PaymentMethodSelectorProps>(({
         <select
           value={paymentMethod}
           onChange={(e) => onSelectMethod(e.target.value)}
-          className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-hidden focus:border-emerald-500 transition cursor-pointer"
+          className="w-full px-3 py-2 text-xs font-medium bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-hidden focus:border-emerald-500 transition cursor-pointer truncate"
         >
           {paymentMethods.map((pm) => (
             <option key={pm.id} value={pm.name} className="bg-white dark:bg-slate-800 text-slate-900 dark:text-white">
-              {pm.name}
+              💳 {pm.name}
             </option>
           ))}
         </select>
@@ -341,26 +343,37 @@ interface ReceiptPhotosProps {
   receiptImages: ReceiptImage[];
   isCompressing: boolean;
   onFilesSelected: (files: FileList | null) => void;
+  onAddImageByUrl: (url: string) => void;
   onRemoveImage: (id: string) => void;
 }
 const ReceiptPhotosSection = React.memo<ReceiptPhotosProps>(({
   receiptImages,
   isCompressing,
   onFilesSelected,
+  onAddImageByUrl,
   onRemoveImage,
 }) => {
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const [showUrlInput, setShowUrlInput] = useState(false);
+  const [urlInput, setUrlInput] = useState('');
+
+  const handleAddUrl = () => {
+    if (!urlInput.trim()) return;
+    onAddImageByUrl(urlInput.trim());
+    setUrlInput('');
+    setShowUrlInput(false);
+  };
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-1.5">
-        <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
           <Receipt className="w-3.5 h-3.5 text-slate-400" />
-          <span>Foto Bukti Transaksi (Opsional)</span>
+          <span>Foto Bukti Struk (Opsional)</span>
         </label>
-        <span className="text-[11px] text-slate-400">
-          {receiptImages.length} foto
+        <span className="text-[10px] text-slate-400">
+          {receiptImages.length} foto terlampir
         </span>
       </div>
 
@@ -381,37 +394,68 @@ const ReceiptPhotosSection = React.memo<ReceiptPhotosProps>(({
         onChange={(e) => onFilesSelected(e.target.files)}
       />
 
-      <div className="flex gap-2">
+      <div className="grid grid-cols-3 gap-1.5">
         <button
           type="button"
           onClick={() => cameraInputRef.current?.click()}
-          className="flex-1 py-2 px-3 text-xs font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl flex items-center justify-center gap-1.5 transition cursor-pointer"
+          className="py-1.5 px-2 text-[11px] font-medium bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-center gap-1 transition cursor-pointer"
         >
-          <Camera className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-          <span>Ambil Kamera</span>
+          <Camera className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+          <span>Kamera</span>
         </button>
         <button
           type="button"
           onClick={() => galleryInputRef.current?.click()}
-          className="flex-1 py-2 px-3 text-xs font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl flex items-center justify-center gap-1.5 transition cursor-pointer"
+          className="py-1.5 px-2 text-[11px] font-medium bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-center gap-1 transition cursor-pointer"
         >
-          <ImageIcon className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-          <span>Pilih Galeri</span>
+          <ImageIcon className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+          <span>Galeri</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowUrlInput((v) => !v)}
+          className={`py-1.5 px-2 text-[11px] font-medium rounded-xl border flex items-center justify-center gap-1 transition cursor-pointer ${
+            showUrlInput
+              ? 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-300 dark:border-indigo-700 text-indigo-600 dark:text-indigo-400'
+              : 'bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
+          }`}
+        >
+          <LinkIcon className="w-3.5 h-3.5 text-indigo-500" />
+          <span>Tautan</span>
         </button>
       </div>
 
+      {showUrlInput && (
+        <div className="flex items-center gap-1.5 pt-1 animate-in fade-in duration-150">
+          <input
+            type="url"
+            placeholder="Tempel tautan/URL foto..."
+            value={urlInput}
+            onChange={(e) => setUrlInput(e.target.value)}
+            className="flex-1 px-2.5 py-1.5 text-xs bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white"
+          />
+          <button
+            type="button"
+            onClick={handleAddUrl}
+            className="px-2.5 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium cursor-pointer"
+          >
+            Tambah
+          </button>
+        </div>
+      )}
+
       {isCompressing && (
-        <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-2 animate-pulse flex items-center gap-1.5">
-          <span>Mengompresi bukti struk agar hemat penyimpanan...</span>
+        <p className="text-[10px] text-emerald-600 dark:text-emerald-400 animate-pulse flex items-center gap-1">
+          <span>Mengompresi foto bukti struk...</span>
         </p>
       )}
 
       {receiptImages.length > 0 && (
-        <div className="grid grid-cols-3 gap-2 mt-2.5">
+        <div className="grid grid-cols-4 gap-2 pt-1">
           {receiptImages.map((img) => (
             <div
               key={img.id}
-              className="relative group rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 aspect-square bg-slate-100 dark:bg-slate-800"
+              className="relative group rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 aspect-square bg-slate-100 dark:bg-slate-800"
             >
               <img
                 src={img.dataUrl}
@@ -422,13 +466,13 @@ const ReceiptPhotosSection = React.memo<ReceiptPhotosProps>(({
               <button
                 type="button"
                 onClick={() => onRemoveImage(img.id)}
-                className="absolute top-1 right-1 p-1 bg-rose-600 text-white rounded-md shadow-xs opacity-90 hover:opacity-100 transition cursor-pointer"
+                className="absolute top-1 right-1 p-0.5 bg-rose-600 text-white rounded-md shadow-xs opacity-90 hover:opacity-100 transition cursor-pointer"
                 title="Hapus foto"
               >
-                <Trash2 className="w-3.5 h-3.5" />
+                <Trash2 className="w-3 h-3" />
               </button>
-              <div className="absolute bottom-0 inset-x-0 bg-black/60 text-white text-[9px] px-1 py-0.5 truncate">
-                {Math.round(img.size / 1024)} KB
+              <div className="absolute bottom-0 inset-x-0 bg-black/60 text-white text-[8px] px-1 py-0.5 truncate text-center">
+                {img.type === 'image/url' ? 'URL' : `${Math.round(img.size / 1024)} KB`}
               </div>
             </div>
           ))}
@@ -473,6 +517,7 @@ const TransactionFormModalComponent: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [showCalculator, setShowCalculator] = useState<boolean>(false);
+  const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
 
   // Link to Debt / Mandatory Bill payment state
   const [linkToDebt, setLinkToDebt] = useState<boolean>(false);
@@ -513,6 +558,14 @@ const TransactionFormModalComponent: React.FC = () => {
         const acc = storageService.getTransactionAccountId(editingTransaction, profile?.id);
         const isDefault = storageService.isDefaultAdminAccount(acc, profile?.id);
         setTargetUserId(isDefault ? 'owner_1' : acc);
+
+        // If editing transaction with advanced fields, open advanced options by default
+        const hasAdvancedData = Boolean(
+          (editingTransaction.description && editingTransaction.description.trim()) ||
+          (editingTransaction.receiptImages && editingTransaction.receiptImages.length > 0) ||
+          editingTransaction.linkedDebtId
+        );
+        setShowAdvanced(hasAdvancedData);
       } else {
         setType(modalDefaultType);
         setAmount(0);
@@ -525,6 +578,7 @@ const TransactionFormModalComponent: React.FC = () => {
         setReceiptImages([]);
         setLinkToDebt(false);
         setSelectedDebtId('');
+        setShowAdvanced(false);
         if (profile?.role === 'admin' && selectedAccountFilter && selectedAccountFilter !== 'all') {
           setTargetUserId(selectedAccountFilter);
         } else {
@@ -559,17 +613,31 @@ const TransactionFormModalComponent: React.FC = () => {
     [users, profile?.id]
   );
 
-  const activeObligations = useMemo(() => {
+  // Relevant active debts/bills for current type
+  const relevantObligations = useMemo(() => {
     return debts.filter((d) => {
       const isUnpaid = d.status === 'unpaid';
       const remaining = typeof d.remainingAmount === 'number' ? d.remainingAmount : d.amount;
-      return isUnpaid && remaining > 0;
+      if (!isUnpaid || remaining <= 0) return false;
+      if (type === 'income') {
+        return d.type === 'piutang';
+      }
+      return d.type !== 'piutang'; // 'utang', 'tagihan', or default
     });
-  }, [debts]);
+  }, [debts, type]);
 
   const selectedDebt = useMemo(() => {
     return debts.find((d) => d.id === selectedDebtId);
   }, [debts, selectedDebtId]);
+
+  // Count active fields in advanced section for badge indicator
+  const advancedBadgeCount = useMemo(() => {
+    let count = 0;
+    if (description.trim()) count++;
+    if (receiptImages.length > 0) count++;
+    if (linkToDebt && selectedDebtId) count++;
+    return count;
+  }, [description, receiptImages.length, linkToDebt, selectedDebtId]);
 
   const handleSelectDebt = useCallback((debtId: string) => {
     setSelectedDebtId(debtId);
@@ -662,6 +730,19 @@ const TransactionFormModalComponent: React.FC = () => {
     }
   }, []);
 
+  const handleAddImageByUrl = useCallback((url: string) => {
+    if (!url) return;
+    const newImage: ReceiptImage = {
+      id: `img_url_${Date.now()}`,
+      dataUrl: url,
+      name: 'Foto Bukti (Tautan)',
+      size: 0,
+      type: 'image/url',
+      timestamp: new Date().toISOString(),
+    };
+    setReceiptImages((prev) => [...prev, newImage]);
+  }, []);
+
   const removeImage = useCallback((id: string) => {
     setReceiptImages((prev) => prev.filter((img) => img.id !== id));
   }, []);
@@ -715,11 +796,11 @@ const TransactionFormModalComponent: React.FC = () => {
       let linkedDebtType: DebtType | undefined = undefined;
       let linkedDebtName: string | undefined = undefined;
 
-      if (type === 'expense' && linkToDebt && selectedDebtId) {
+      if (linkToDebt && selectedDebtId) {
         const debtObj = debts.find((d) => d.id === selectedDebtId);
         if (debtObj) {
           linkedDebtId = debtObj.id;
-          linkedDebtType = debtObj.type || 'utang';
+          linkedDebtType = debtObj.type || (type === 'income' ? 'piutang' : 'utang');
           linkedDebtName = debtObj.title || debtObj.borrowerName;
         }
       }
@@ -768,6 +849,7 @@ const TransactionFormModalComponent: React.FC = () => {
         }
       }
 
+      // Close modal automatically on successful save
       closeAddModal();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Transaksi gagal disimpan ke database. Silakan coba kembali.';
@@ -799,23 +881,29 @@ const TransactionFormModalComponent: React.FC = () => {
   if (!isAddModalOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-xs overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-150">
       <div 
-        className="w-full max-w-lg my-auto rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[92vh]"
+        className="w-full max-w-lg my-auto rounded-2xl sm:rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[92vh] transition-all"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-800">
-          <div className="flex items-center gap-2">
-            <div className={`p-2 rounded-xl ${type === 'expense' ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'}`}>
-              {type === 'expense' ? <ArrowUpRight className="w-5 h-5" /> : <ArrowDownLeft className="w-5 h-5" />}
+        <div className="flex items-center justify-between px-4 sm:px-5 py-3.5 border-b border-slate-100 dark:border-slate-800 shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className={`p-2 rounded-xl transition-colors ${
+              type === 'expense' 
+                ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400' 
+                : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+            }`}>
+              {type === 'expense' ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownLeft className="w-4 h-4" />}
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                {editingTransaction ? 'Ubah Transaksi' : 'Catat Transaksi'}
+              <h2 className="text-sm sm:text-base font-bold text-slate-900 dark:text-slate-100 leading-tight">
+                {editingTransaction 
+                  ? 'Ubah Transaksi' 
+                  : (type === 'expense' ? 'Catat Pengeluaran' : 'Catat Pemasukan')}
               </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Pencatatan keuangan untuk Tuan Muda
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Dompet Omti · Kelola Keuangan
               </p>
             </div>
           </div>
@@ -823,13 +911,14 @@ const TransactionFormModalComponent: React.FC = () => {
             type="button"
             onClick={closeAddModal}
             className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+            aria-label="Tutup Modal"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Modal Body */}
-        <form onSubmit={handleSubmit} className="p-5 overflow-y-auto space-y-4 flex-1">
+        {/* Modal Scrollable Body */}
+        <form onSubmit={handleSubmit} className="px-4 py-3.5 sm:px-5 sm:py-4 overflow-y-auto space-y-3 sm:space-y-3.5 flex-1">
           {error && (
             <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/60 text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
@@ -837,7 +926,7 @@ const TransactionFormModalComponent: React.FC = () => {
             </div>
           )}
 
-          {/* Segmented Type Switch */}
+          {/* 1. Struktur Tab Jenis Transaksi (Pengeluaran: Rose | Pemasukan: Emerald) */}
           <TypeSwitcherSection type={type} onSelectType={setType} />
 
           {/* Akun / Brankas Target (Khusus Admin) */}
@@ -850,27 +939,34 @@ const TransactionFormModalComponent: React.FC = () => {
             isEditing={!!editingTransaction}
           />
 
-          {/* Nominal Input & Quick Chips */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Nominal Transaksi (IDR)
+          {/* 2. Input Utama 1: Nominal / Jumlah (Rp) - Font Paling Menonjol & Besar */}
+          <div className={`p-3 sm:p-3.5 rounded-2xl border transition-all ${
+            type === 'expense'
+              ? 'bg-rose-50/30 dark:bg-slate-800/60 border-rose-200/80 dark:border-rose-950/60 focus-within:border-rose-500 focus-within:ring-2 focus-within:ring-rose-500/20'
+              : 'bg-emerald-50/30 dark:bg-slate-800/60 border-emerald-200/80 dark:border-emerald-950/60 focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-500/20'
+          }`}>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider">
+                Nominal Transaksi (Rp)
               </label>
               <button
                 type="button"
                 onClick={toggleCalculator}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold transition cursor-pointer ${
                   showCalculator
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border border-emerald-200 dark:border-emerald-800'
+                    ? (type === 'expense' ? 'bg-rose-600 text-white' : 'bg-emerald-600 text-white')
+                    : 'text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-700/80 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200/80 dark:border-slate-600'
                 }`}
               >
-                <Calculator className="w-3.5 h-3.5" />
-                <span>{showCalculator ? 'Tutup Kalkulator' : 'Mini Kalkulator'}</span>
+                <Calculator className="w-3 h-3" />
+                <span>{showCalculator ? 'Tutup' : 'Kalkulator'}</span>
               </button>
             </div>
-            <div className="relative">
-              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500">
+
+            <div className="flex items-baseline gap-2 pt-1 pb-0.5">
+              <span className={`text-lg sm:text-xl font-black ${
+                type === 'expense' ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
+              }`}>
                 Rp
               </span>
               <input
@@ -880,11 +976,11 @@ const TransactionFormModalComponent: React.FC = () => {
                 onChange={handleNominalChange}
                 placeholder="0"
                 autoFocus
-                className="w-full pl-11 pr-4 py-3 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-lg font-bold tabular-nums text-slate-900 dark:text-white focus:outline-hidden focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition"
+                className="w-full text-2xl sm:text-3xl font-black tracking-tight tabular-nums bg-transparent border-0 p-0 text-slate-900 dark:text-white placeholder:text-slate-300 dark:placeholder:text-slate-600 focus:outline-hidden focus:ring-0"
               />
             </div>
 
-            {/* Quick Denomination Chips */}
+            {/* Quick Amount Chips */}
             <QuickAmountChips
               hasAmount={amount > 0}
               onAddAmount={handleAddQuickAmount}
@@ -893,7 +989,7 @@ const TransactionFormModalComponent: React.FC = () => {
 
             {/* Interactive Mini Calculator */}
             {showCalculator && (
-              <div className="mt-3">
+              <div className="mt-3 pt-3 border-t border-slate-200/60 dark:border-slate-700/60 animate-in fade-in duration-150">
                 <MiniCalculator
                   initialValue={amount}
                   onApplyValue={handleApplyCalculatorValue}
@@ -903,25 +999,8 @@ const TransactionFormModalComponent: React.FC = () => {
             )}
           </div>
 
-          {/* Two Columns: Tanggal & Kategori */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {/* Tanggal */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                Tanggal
-              </label>
-              <div className="relative">
-                <input
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-hidden focus:border-emerald-500 transition cursor-pointer"
-                />
-                <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              </div>
-            </div>
-
-            {/* Kategori */}
+          {/* 2. Input Utama 2: Kategori & Metode Pembayaran (Rapat dalam 2 Kolom Sejajar) */}
+          <div className="grid grid-cols-2 gap-2 sm:gap-2.5">
             <CategorySelectorSection
               categories={filteredCategories}
               categoryId={categoryId}
@@ -929,115 +1008,192 @@ const TransactionFormModalComponent: React.FC = () => {
               onSaveNewCategory={handleSaveInlineCategory}
               type={type}
             />
-          </div>
-
-          {/* Metode Pembayaran */}
-          <PaymentMethodSelectorSection
-            paymentMethods={paymentMethods}
-            paymentMethod={paymentMethod}
-            onSelectMethod={setPaymentMethod}
-            onSaveNewMethod={handleSaveInlineMethod}
-          />
-
-          {/* Opsi Tautkan ke Pembayaran Utang / Tagihan Wajib (Khusus Pengeluaran) */}
-          {type === 'expense' && (
-            <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 rounded-xl space-y-2.5 transition">
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={linkToDebt}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setLinkToDebt(checked);
-                    if (!checked) {
-                      setSelectedDebtId('');
-                    } else if (activeObligations.length > 0 && !selectedDebtId) {
-                      handleSelectDebt(activeObligations[0].id);
-                    }
-                  }}
-                  className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300 dark:border-slate-600 cursor-pointer"
-                />
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-800 dark:text-slate-200">
-                  <HandCoins className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                  <span>Tautkan ke Pembayaran Utang / Tagihan Wajib</span>
-                </div>
-              </label>
-
-              {linkToDebt && (
-                <div className="space-y-2 pt-1 animate-in fade-in duration-150">
-                  {activeObligations.length === 0 ? (
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 italic">
-                      Tidak ada catatan utang atau tagihan aktif yang belum lunas.
-                    </p>
-                  ) : (
-                    <>
-                      <select
-                        value={selectedDebtId}
-                        onChange={(e) => handleSelectDebt(e.target.value)}
-                        className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-hidden focus:border-emerald-500 transition cursor-pointer"
-                      >
-                        <option value="">-- Pilih Utang atau Tagihan Wajib --</option>
-                        {activeObligations.map((d) => {
-                          const rem = typeof d.remainingAmount === 'number' ? d.remainingAmount : d.amount;
-                          const typeLabel = d.type === 'tagihan' ? '📋 Tagihan' : (d.type === 'piutang' ? '🤝 Piutang' : '💸 Utang');
-                          const nameLabel = d.title ? `${d.title} (${d.borrowerName})` : d.borrowerName;
-                          const installmentLabel = d.monthlyInstallment ? ` · Cicilan: ${formatRupiah(d.monthlyInstallment)}/bln` : '';
-                          return (
-                            <option key={d.id} value={d.id}>
-                              {typeLabel}: {nameLabel} - Sisa: {formatRupiah(rem)}{installmentLabel}
-                            </option>
-                          );
-                        })}
-                      </select>
-
-                      {selectedDebt && (
-                        <div className="p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/60 dark:border-emerald-800/60 text-[11px] text-emerald-800 dark:text-emerald-300 flex items-start gap-2">
-                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5 text-emerald-600 dark:text-emerald-400" />
-                          <div>
-                            <p className="font-semibold">
-                              {selectedDebt.type === 'tagihan' ? 'Tagihan Wajib' : (selectedDebt.type === 'piutang' ? 'Piutang' : 'Utang')} terpilih: {selectedDebt.title || selectedDebt.borrowerName}
-                            </p>
-                            <p className="text-emerald-700 dark:text-emerald-400 mt-0.5">
-                              Sisa saldo saat ini: <strong>{formatRupiah(typeof selectedDebt.remainingAmount === 'number' ? selectedDebt.remainingAmount : selectedDebt.amount)}</strong>
-                              {selectedDebt.monthlyInstallment ? ` (Target cicilan: ${formatRupiah(selectedDebt.monthlyInstallment)}/bulan)` : ''}
-                            </p>
-                            <p className="text-[10px] text-emerald-600/90 dark:text-emerald-400/90 mt-1">
-                              ✓ Sisa saldo utang/tagihan akan otomatis berkurang secara real-time setelah transaksi disimpan.
-                            </p>
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Deskripsi / Catatan */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-              Deskripsi / Catatan Transaksi
-            </label>
-            <input
-              type="text"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Contoh: Jamuan makan malam, servis mobil, gaji, dll."
-              className="w-full px-3.5 py-2 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-hidden focus:border-emerald-500 transition"
+            <PaymentMethodSelectorSection
+              paymentMethods={paymentMethods}
+              paymentMethod={paymentMethod}
+              onSelectMethod={setPaymentMethod}
+              onSaveNewMethod={handleSaveInlineMethod}
             />
           </div>
 
-          {/* Bukti Transaksi (Receipt Photos) */}
-          <ReceiptPhotosSection
-            receiptImages={receiptImages}
-            isCompressing={isCompressing}
-            onFilesSelected={handleFiles}
-            onRemoveImage={removeImage}
-          />
+          {/* 2. Input Utama 3: Tanggal Transaksi (Datepicker Ringkas) */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                Tanggal Transaksi
+              </label>
+              {date !== getTodayDateString() && (
+                <button
+                  type="button"
+                  onClick={() => setDate(getTodayDateString())}
+                  className="text-[10px] text-emerald-600 dark:text-emerald-400 hover:underline font-semibold cursor-pointer"
+                >
+                  Set Hari Ini
+                </button>
+              )}
+            </div>
+            <div className="relative flex items-center">
+              <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-3 pointer-events-none" />
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 text-xs font-semibold bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-200 focus:outline-hidden focus:border-emerald-500 transition cursor-pointer"
+              />
+            </div>
+          </div>
 
-          {/* Form Actions */}
-          <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-2.5">
+          {/* 3. Seksi "Opsi Lanjutan" (Menu Lipat / Collapsible) */}
+          <div className="pt-1">
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((prev) => !prev)}
+              className="w-full py-2 px-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200/80 dark:border-slate-700/70 flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-300 transition cursor-pointer"
+            >
+              <div className="flex items-center gap-2">
+                <SlidersHorizontal className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+                <span>Opsi Lanjutan</span>
+                {advancedBadgeCount > 0 && (
+                  <span className={`px-1.5 py-0.2 text-[10px] font-bold rounded-full ${
+                    type === 'expense'
+                      ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30'
+                      : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                  }`}>
+                    {advancedBadgeCount} aktif
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1 text-[11px] text-slate-400 dark:text-slate-500">
+                <span>{showAdvanced ? 'Tutup' : 'Buka'}</span>
+                {showAdvanced ? (
+                  <ChevronUp className="w-4 h-4 text-slate-500" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 text-slate-500" />
+                )}
+              </div>
+            </button>
+
+            {showAdvanced && (
+              <div className="mt-2.5 p-3 sm:p-3.5 rounded-2xl bg-slate-50/80 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-700/60 space-y-3 animate-in fade-in duration-150">
+                {/* 3.1. Catatan / Keterangan Transaksi */}
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Catatan / Keterangan
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="Contoh: Makan siang dengan klien, belanja stok, dll."
+                    className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden focus:border-emerald-500 resize-none transition"
+                  />
+                </div>
+
+                {/* 3.2. Unggah / Tautan Foto Bukti Struk */}
+                <ReceiptPhotosSection
+                  receiptImages={receiptImages}
+                  isCompressing={isCompressing}
+                  onFilesSelected={handleFiles}
+                  onAddImageByUrl={handleAddImageByUrl}
+                  onRemoveImage={removeImage}
+                />
+
+                {/* 3.3. Tautan ke Utang / Tagihan */}
+                <div className="p-3 bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={linkToDebt}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setLinkToDebt(checked);
+                        if (!checked) {
+                          setSelectedDebtId('');
+                        } else if (relevantObligations.length > 0 && !selectedDebtId) {
+                          handleSelectDebt(relevantObligations[0].id);
+                        }
+                      }}
+                      className={`w-4 h-4 rounded cursor-pointer ${
+                        type === 'expense'
+                          ? 'text-rose-600 focus:ring-rose-500'
+                          : 'text-emerald-600 focus:ring-emerald-500'
+                      } border-slate-300 dark:border-slate-600`}
+                    />
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                      <HandCoins className={`w-3.5 h-3.5 ${type === 'expense' ? 'text-rose-500' : 'text-emerald-500'}`} />
+                      <span>
+                        {type === 'expense'
+                          ? 'Tautkan ke Pembayaran Utang / Tagihan'
+                          : 'Tautkan ke Pelunasan Piutang'}
+                      </span>
+                    </div>
+                  </label>
+
+                  {linkToDebt && (
+                    <div className="space-y-2 pt-1 animate-in fade-in duration-150">
+                      {relevantObligations.length === 0 ? (
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 italic">
+                          {type === 'expense'
+                            ? 'Tidak ada catatan utang atau tagihan aktif yang belum lunas.'
+                            : 'Tidak ada catatan piutang aktif yang belum lunas.'}
+                        </p>
+                      ) : (
+                        <>
+                          <select
+                            value={selectedDebtId}
+                            onChange={(e) => handleSelectDebt(e.target.value)}
+                            className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-hidden focus:border-emerald-500 transition cursor-pointer truncate"
+                          >
+                            <option value="">
+                              -- Pilih {type === 'expense' ? 'Utang atau Tagihan' : 'Piutang'} --
+                            </option>
+                            {relevantObligations.map((d) => {
+                              const rem = typeof d.remainingAmount === 'number' ? d.remainingAmount : d.amount;
+                              const typeLabel = d.type === 'tagihan' ? '📋 Tagihan' : (d.type === 'piutang' ? '🤝 Piutang' : '💸 Utang');
+                              const nameLabel = d.title ? `${d.title} (${d.borrowerName})` : d.borrowerName;
+                              const installmentLabel = d.monthlyInstallment ? ` · Cicilan: ${formatRupiah(d.monthlyInstallment)}/bln` : '';
+                              return (
+                                <option key={d.id} value={d.id}>
+                                  {typeLabel}: {nameLabel} - Sisa: {formatRupiah(rem)}{installmentLabel}
+                                </option>
+                              );
+                            })}
+                          </select>
+
+                          {selectedDebt && (
+                            <div className={`p-2.5 rounded-lg text-[11px] flex items-start gap-2 ${
+                              type === 'expense'
+                                ? 'bg-rose-50 dark:bg-rose-950/40 border border-rose-200/60 dark:border-rose-900/60 text-rose-800 dark:text-rose-300'
+                                : 'bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/60 dark:border-emerald-800/60 text-emerald-800 dark:text-emerald-300'
+                            }`}>
+                              <CheckCircle2 className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${
+                                type === 'expense' ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
+                              }`} />
+                              <div>
+                                <p className="font-semibold">
+                                  {selectedDebt.type === 'tagihan' ? 'Tagihan Wajib' : (selectedDebt.type === 'piutang' ? 'Piutang' : 'Utang')} terpilih: {selectedDebt.title || selectedDebt.borrowerName}
+                                </p>
+                                <p className="mt-0.5 opacity-90">
+                                  Sisa saldo: <strong>{formatRupiah(typeof selectedDebt.remainingAmount === 'number' ? selectedDebt.remainingAmount : selectedDebt.amount)}</strong>
+                                  {selectedDebt.monthlyInstallment ? ` (Target cicilan: ${formatRupiah(selectedDebt.monthlyInstallment)}/bulan)` : ''}
+                                </p>
+                                <p className="text-[10px] mt-1 opacity-80">
+                                  ✓ Saldo akan otomatis berkurang secara real-time saat transaksi disimpan.
+                                </p>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Form Actions (Sticky at Bottom) */}
+          <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-2 shrink-0">
             <button
               type="button"
               onClick={closeAddModal}
@@ -1049,7 +1205,11 @@ const TransactionFormModalComponent: React.FC = () => {
             <button
               type="submit"
               disabled={isSubmitting || isCompressing}
-              className="px-5 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-xl shadow-xs shadow-emerald-600/30 transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
+              className={`px-5 py-2 text-xs font-bold text-white rounded-xl shadow-md transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2 ${
+                type === 'expense'
+                  ? 'bg-rose-600 hover:bg-rose-700 active:bg-rose-800 shadow-rose-600/25'
+                  : 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 shadow-emerald-600/25'
+              }`}
             >
               {isSubmitting && (
                 <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -1070,3 +1230,5 @@ const TransactionFormModalComponent: React.FC = () => {
 };
 
 export const TransactionFormModal = React.memo(TransactionFormModalComponent);
+export const AddTransactionModal = TransactionFormModal;
+export default TransactionFormModal;

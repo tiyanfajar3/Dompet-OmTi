@@ -1213,6 +1213,9 @@ export const storageService = {
         displayName: profile.displayName,
         profilePhoto: profile.profilePhoto,
         theme: profile.theme,
+        role: profile.role,
+        profileData: profile.profileData || profile.bioData,
+        socialMedia: profile.socialMedia,
       } : undefined,
       transactions,
       categories,
@@ -1273,6 +1276,9 @@ export const storageService = {
         currentProfile.displayName = backup.userProfile.displayName || currentProfile.displayName;
         currentProfile.profilePhoto = backup.userProfile.profilePhoto || currentProfile.profilePhoto;
         currentProfile.theme = backup.userProfile.theme || currentProfile.theme;
+        currentProfile.profileData = backup.userProfile.profileData || currentProfile.profileData;
+        currentProfile.bioData = backup.userProfile.profileData || currentProfile.bioData;
+        currentProfile.socialMedia = backup.userProfile.socialMedia || currentProfile.socialMedia;
         await this.saveProfile(currentProfile);
       }
     }

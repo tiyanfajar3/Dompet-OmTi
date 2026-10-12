@@ -10,10 +10,28 @@ import { ReportsPage } from './components/reports/ReportsPage';
 import { ProfileSettingsPage } from './components/profile/ProfileSettingsPage';
 import { TransactionFormModal } from './components/transactions/TransactionFormModal';
 import { OfflineIndicator } from './components/common/OfflineIndicator';
+import { SessionTimeoutModal } from './components/common/SessionTimeoutModal';
+import { useIdleTimeout } from './hooks/useIdleTimeout';
 import { Wallet, AlertCircle, X } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
-  const { profile, isAuthenticated, isLoading, activeTab, firestoreError, clearFirestoreError } = useApp();
+  const { profile, isAuthenticated, isLoading, activeTab, firestoreError, clearFirestoreError, logout } = useApp();
+
+  // Keamanan Auto-Logout: 3 menit tidak aktif (dengan jendela peringatan interaktif 30 detik)
+  const { isWarningOpen, remainingSeconds, warningSeconds, resetTimer } = useIdleTimeout({
+    timeoutMs: 3 * 60 * 1000, // 3 menit
+    warningMs: 30 * 1000,      // 30 detik countdown peringatan
+    enabled: isAuthenticated && !isLoading,
+    onTimeout: () => {
+      try {
+        sessionStorage.setItem(
+          'dompet_omti_session_timeout_msg',
+          'Sesi Anda telah berakhir karena tidak ada aktivitas selama 3 menit demi menjaga kerahasiaan brankas. Silakan masuk kembali.'
+        );
+      } catch {}
+      logout();
+    },
+  });
 
   if (isLoading) {
     const isAdmin = profile?.role === 'admin';
@@ -67,6 +85,13 @@ const MainLayout: React.FC = () => {
 
       <BottomNav />
       <TransactionFormModal />
+      <SessionTimeoutModal
+        isOpen={isWarningOpen}
+        remainingSeconds={remainingSeconds}
+        maxSeconds={warningSeconds}
+        onStayLoggedIn={resetTimer}
+        onLogout={logout}
+      />
     </div>
   );
 };

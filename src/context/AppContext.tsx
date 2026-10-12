@@ -16,6 +16,8 @@ import {
 import { storageService, initializeDatabase, getLocalUsers } from '../lib/storage';
 import { verifyPassword, hashPassword, generateSalt } from '../lib/crypto';
 import { getTodayDateString } from '../lib/formatters';
+import { signOut } from 'firebase/auth';
+import { auth } from '../lib/firebase';
 
 interface AppContextType {
   // Auth & Profile
@@ -524,6 +526,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Logout handler
   const logout = useCallback(() => {
     localStorage.removeItem(SESSION_KEY);
+    try {
+      signOut(auth);
+    } catch {}
     setIsAuthenticated(false);
     setProfile(null);
     setTransactions([]);
